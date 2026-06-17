@@ -14,13 +14,11 @@ class TooManyRequestsException extends HttpException {
   }
 }
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import type { Cache } from 'cache-manager';
 
-import {
-  VERIFY_MODULE_OPTIONS,
-  VerifyModuleOptions,
-} from './interfaces/module-options.interface.js';
-import {
+import { VERIFY_MODULE_OPTIONS } from './interfaces/module-options.interface.js';
+import type { VerifyModuleOptions } from './interfaces/module-options.interface.js';
+import type {
   VerificationChannel,
   VerificationRecord,
 } from './interfaces/verify-store.interface.js';
