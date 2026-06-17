@@ -1,0 +1,28 @@
+{
+  "name": "basic-twilio-postgres",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jadedm/nestjs-verify": "workspace:*",
+    "@jadedm/nestjs-verify-twilio": "workspace:*",
+    "@jadedm/nestjs-verify-postgres": "workspace:*",
+    "@nestjs/cache-manager": "^2.2.0",
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/platform-express": "^10.3.0",
+    "cache-manager": "^5.4.0",
+    "pg": "^8.11.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0",
+    "twilio": "^5.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
