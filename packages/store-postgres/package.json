@@ -2,7 +2,12 @@
   "name": "@jadedm/nestjs-verify-postgres",
   "version": "0.1.0",
   "description": "Postgres store adapter for @jadedm/nestjs-verify (verifications + abuse log).",
-  "keywords": ["nestjs", "otp", "verify", "postgres"],
+  "keywords": [
+    "nestjs",
+    "otp",
+    "verify",
+    "postgres"
+  ],
   "license": "MIT",
   "author": "jadedm <jadedmanish@gmail.com>",
   "repository": {
@@ -15,11 +20,21 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.mts", "default": "./dist/index.mjs" },
-      "require": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

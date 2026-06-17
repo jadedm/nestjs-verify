@@ -3,7 +3,13 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "fixed": [],
-  "linked": [],
+  "linked": [
+    [
+      "@jadedm/nestjs-verify",
+      "@jadedm/nestjs-verify-twilio",
+      "@jadedm/nestjs-verify-postgres"
+    ]
+  ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",

@@ -2,7 +2,13 @@
   "name": "@jadedm/nestjs-verify-twilio",
   "version": "0.1.0",
   "description": "Twilio SMS provider adapter for @jadedm/nestjs-verify.",
-  "keywords": ["nestjs", "otp", "verify", "twilio", "sms"],
+  "keywords": [
+    "nestjs",
+    "otp",
+    "verify",
+    "twilio",
+    "sms"
+  ],
   "license": "MIT",
   "author": "jadedm <jadedmanish@gmail.com>",
   "repository": {
@@ -15,11 +21,21 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.mts", "default": "./dist/index.mjs" },
-      "require": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
