@@ -19,9 +19,26 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Build first so each package's dist/.d.ts exists. Downstream packages
-      # (provider-twilio, store-postgres, store-mongo) import types from
+      # (twilio, gupshup, postgres, mongo, redis) import types from
       # @jadedm/nestjs-verify via its package.json "types" field, which
       # points at dist/index.d.ts.
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
+
+  adapters:
+    runs-on: ubuntu-latest
+    # Run the live adapter contract suite. Spins up Postgres + Mongo + Redis
+    # in Docker and exercises every store interface against each. Catches
+    # adapter regressions that unit tests miss.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:adapters

@@ -1,15 +1,17 @@
-import {
-  BadRequestException,
-  HttpException,
-  HttpStatus,
-  Inject,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { VERIFY_MODULE_OPTIONS } from './interfaces/module-options.interface.js';
 import type { VerifyModuleOptions } from './interfaces/module-options.interface.js';
+import {
+  AbuseVelocityException,
+  CodeExpiredException,
+  CooldownActiveException,
+  InvalidPhoneException,
+  IpRateLimitedException,
+  NoPendingVerificationException,
+  PhoneRateLimitedException,
+  SmsDispatchFailedException,
+} from './errors.js';
 import type {
   VerificationChannel,
   VerificationRecord,
@@ -21,12 +23,6 @@ import {
   generateSid,
   hashCode,
 } from './code/code-gen.js';
-
-class TooManyRequestsException extends HttpException {
-  constructor(response: string | Record<string, unknown>) {
-    super(response, HttpStatus.TOO_MANY_REQUESTS);
-  }
-}
 
 export interface StartParams {
   to: string;
@@ -99,11 +95,7 @@ export class VerifyService {
     const cooldownMs = await this.options.stores.cooldown.remaining(phone);
     if (cooldownMs > 0) {
       this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)} remainingMs=${cooldownMs}`);
-      throw new TooManyRequestsException({
-        code: 'COOLDOWN_ACTIVE',
-        message: 'A code was sent recently. Please wait before requesting another.',
-        retryAfterMs: cooldownMs,
-      });
+      throw new CooldownActiveException(cooldownMs);
     }
 
     await this.enforceRateLimits(phone, params.ip);
@@ -161,10 +153,7 @@ export class VerifyService {
         success: false,
         errorCode: (err as Error).message,
       });
-      throw new ServiceUnavailableException({
-        code: 'SMS_DISPATCH_FAILED',
-        message: 'Unable to dispatch verification code. Please try again.',
-      });
+      throw new SmsDispatchFailedException();
     }
 
     return {
@@ -180,18 +169,12 @@ export class VerifyService {
     this.vlog(`check: phone=${this.redact(phone)} ip=${params.ip ?? '-'}`);
     const sid = await this.options.stores.phoneIndex.get(phone);
     if (!sid) {
-      throw new BadRequestException({
-        code: 'NO_PENDING_VERIFICATION',
-        message: 'No active verification for this number.',
-      });
+      throw new NoPendingVerificationException();
     }
 
     const record = await this.options.stores.verify.get(sid);
     if (!record) {
-      throw new BadRequestException({
-        code: 'NO_PENDING_VERIFICATION',
-        message: 'No active verification for this number.',
-      });
+      throw new NoPendingVerificationException();
     }
 
     if (record.status !== 'pending') {
@@ -204,10 +187,7 @@ export class VerifyService {
 
     if (record.expiresAt.getTime() <= Date.now()) {
       await this.options.stores.verify.markStatus(sid, 'expired');
-      throw new BadRequestException({
-        code: 'CODE_EXPIRED',
-        message: 'The code has expired. Request a new one.',
-      });
+      throw new CodeExpiredException();
     }
 
     const expectedHash = hashCode(params.code, record.salt);
@@ -279,11 +259,7 @@ export class VerifyService {
       perPhone.windowSeconds,
     );
     if (phoneHit.exceeded) {
-      throw new TooManyRequestsException({
-        code: 'PHONE_RATE_LIMITED',
-        message: 'Too many verification requests for this number.',
-        resetAt: phoneHit.resetAt,
-      });
+      throw new PhoneRateLimitedException(phoneHit.resetAt);
     }
     if (ip) {
       const perIp = this.options.rateLimit?.perIp ?? DEFAULTS.perIp;
@@ -293,11 +269,7 @@ export class VerifyService {
         perIp.windowSeconds,
       );
       if (ipHit.exceeded) {
-        throw new TooManyRequestsException({
-          code: 'IP_RATE_LIMITED',
-          message: 'Too many verification requests from this network.',
-          resetAt: ipHit.resetAt,
-        });
+        throw new IpRateLimitedException(ipHit.resetAt);
       }
     }
   }
@@ -318,20 +290,14 @@ export class VerifyService {
       windowSeconds * 1000,
     );
     if (distinct >= maxDistinct) {
-      throw new TooManyRequestsException({
-        code: 'ABUSE_VELOCITY',
-        message: 'Suspicious request pattern detected.',
-      });
+      throw new AbuseVelocityException();
     }
   }
 
   private normalizePhone(input: string): string {
     const trimmed = input.trim().replace(/\s+/g, '');
     if (!/^\+\d{6,15}$/.test(trimmed)) {
-      throw new BadRequestException({
-        code: 'INVALID_PHONE',
-        message: 'Phone must be E.164 format, e.g. +14155552671.',
-      });
+      throw new InvalidPhoneException();
     }
     return trimmed;
   }

@@ -1,5 +1,27 @@
 # @jadedm/nestjs-verify
 
+## 0.4.0
+
+### Minor Changes
+
+- DX hardening release. No breaking changes from 0.3.0 on the wire or in the store interfaces.
+
+- DTO validation:
+  - `StartVerificationDto` and `CheckVerificationDto` now carry `class-validator` decorators. Wire `app.useGlobalPipes(new ValidationPipe({ transform: true }))` to surface validation errors with descriptive messages.
+  - Service-layer phone regex check still runs as a safety net.
+
+- OpenAPI / Swagger:
+  - Added `@nestjs/swagger` as a peer dep.
+  - New `VerifySwagger` const exported from core, following a per-feature `controllers/swagger/*.swagger.ts` convention. The built-in controller applies these decorators inline so adopters get a fully-documented `/verify/start` and `/verify/check` route in their Swagger UI for free.
+  - DTOs carry `@ApiProperty` so the Swagger schemas render the right examples.
+
+- Structured error catalog:
+  - New `VerifyErrorCode` enum exports stable string codes (`COOLDOWN_ACTIVE`, `PHONE_RATE_LIMITED`, etc.). Clients can branch on `code` instead of message strings.
+  - New `VerifyException` base class plus per-error subclasses (`InvalidPhoneException`, `CooldownActiveException`, `PhoneRateLimitedException`, `IpRateLimitedException`, `AbuseVelocityException`, `SmsDispatchFailedException`, `NoPendingVerificationException`, `CodeExpiredException`). Catch the base to handle all verify errors uniformly in a global filter.
+
+- New utility:
+  - `asyncHandler` exported from core. Go-style `[data, error]` tuple wrapper around any Promise. Used internally by the Gupshup provider and available to adopters.
+
 ## 0.3.0
 
 ### Minor Changes (BREAKING)

@@ -1,14 +1,14 @@
 {
-  "name": "@jadedm/nestjs-verify-redis",
+  "name": "@jadedm/nestjs-verify-gupshup",
   "version": "0.4.0",
-  "description": "Redis store adapter for @jadedm/nestjs-verify. Atomic rate limit, cooldown, phone-index via Lua and native TTL primitives.",
-  "keywords": ["nestjs", "otp", "verify", "redis", "ioredis", "rate-limit"],
+  "description": "Gupshup SMS provider adapter for @jadedm/nestjs-verify. India and SEA SMS dispatch.",
+  "keywords": ["nestjs", "otp", "verify", "gupshup", "sms", "india"],
   "license": "MIT",
   "author": "jadedm <jadedmanish@gmail.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/jadedm/nestjs-verify.git",
-    "directory": "packages/store-redis"
+    "directory": "packages/provider-gupshup"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -28,14 +28,9 @@
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
-    "@jadedm/nestjs-verify": "workspace:^",
-    "ioredis": "^5.0.0"
-  },
-  "peerDependenciesMeta": {
-    "ioredis": { "optional": true }
+    "@jadedm/nestjs-verify": "workspace:^"
   },
   "devDependencies": {
-    "@jadedm/nestjs-verify": "workspace:*",
-    "ioredis": "^5.4.0"
+    "@jadedm/nestjs-verify": "workspace:*"
   }
 }

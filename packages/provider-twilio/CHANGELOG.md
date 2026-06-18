@@ -1,5 +1,12 @@
 # @jadedm/nestjs-verify-twilio
 
+## 0.4.0
+
+### Minor Changes
+
+- Released alongside `@jadedm/nestjs-verify` 0.4.0 (DX hardening: class-validator DTOs, OpenAPI annotations, structured error code catalog, asyncHandler utility). No functional change in this package; version bumped to keep the linked group aligned.
+
+
 ## 0.3.0
 
 ### Minor Changes (BREAKING)

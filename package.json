@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
+    "@jadedm/nestjs-verify-gupshup": "workspace:*",
     "@jadedm/nestjs-verify-mongo": "workspace:*",
     "@jadedm/nestjs-verify-postgres": "workspace:*",
     "@jadedm/nestjs-verify-redis": "workspace:*",
