@@ -57,16 +57,16 @@ For real deployments, replace `MockSmsProvider` with `TwilioSmsProvider` and the
 
 ## State machine
 
-```
-                                              ┌──────────────┐
-                                       ┌─────▶│   approved   │   (correct code submitted)
-┌──────────┐  start ─▶ pending  ─────┐ │      └──────────────┘
-│  client  │                          ▼ │      ┌──────────────┐
-└──────────┘                         check ─▶  │   canceled   │   (attempts exhausted, or markStatus)
-                                              └──────────────┘
-                                              ┌──────────────┐
-                                              │   expired    │   (past expiresAt on next read)
-                                              └──────────────┘
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> pending: POST /verify/start
+    pending --> approved: POST /verify/check (correct code)
+    pending --> canceled: attempts exhausted, or markStatus
+    pending --> expired: past expiresAt on next read
+    approved --> [*]
+    canceled --> [*]
+    expired --> [*]
 ```
 
 A verification is created in `pending`. It transitions exactly once, to `approved`, `canceled`, or `expired`. The wire representation calls the field `state`, distinct from JSend-style envelope `status`.
