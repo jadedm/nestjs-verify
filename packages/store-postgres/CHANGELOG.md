@@ -1,5 +1,18 @@
 # @jadedm/nestjs-verify-postgres
 
+## 0.3.0
+
+### Minor Changes (BREAKING)
+
+- Three new stores added to match the unified store architecture in core 0.3.0:
+  - `PostgresRateLimitStore` with atomic counter-with-window via a single `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`. No get-then-set race.
+  - `PostgresCooldownStore` returning precise milliseconds remaining.
+  - `PostgresPhoneIndexStore` replacing the old cache-backed lookup.
+- New `createPostgresStores` factory returns all five stores plus a shared `pg.Pool` in one call. Replaces the per-store constructor pattern.
+- New `runMigrations` runner with `pg_try_advisory_lock` for concurrent-instance safety. Each migration runs in a transaction and the version counter is tracked in a `verify_schema_versions` table. The previously exported `VERIFICATIONS_TABLE_DDL` and `ABUSE_TABLE_DDL` constants have been removed; the schema is now encoded in the exported `MIGRATIONS` array.
+- `PostgresVerifyStore` and `PostgresAbuseStore` no longer expose `ensureSchema()`. Schema setup runs as part of the factory.
+
+
 ## 0.2.0
 
 ### Minor Changes

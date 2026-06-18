@@ -1,25 +1,15 @@
 import { Module } from '@nestjs/common';
-import { CacheModule } from '@nestjs/cache-manager';
 import { VerifyModule } from '@jadedm/nestjs-verify';
 import { TwilioSmsProvider } from '@jadedm/nestjs-verify-twilio';
-import {
-  PostgresAbuseStore,
-  PostgresVerifyStore,
-} from '@jadedm/nestjs-verify-postgres';
+import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
 
 @Module({
   imports: [
-    CacheModule.register({ isGlobal: true }),
     VerifyModule.forRootAsync({
       useFactory: async () => {
-        const verify = new PostgresVerifyStore({
+        const stores = await createPostgresStores({
           connectionString: process.env.DATABASE_URL!,
         });
-        const abuse = new PostgresAbuseStore({
-          connectionString: process.env.DATABASE_URL!,
-        });
-        await verify.ensureSchema();
-        await abuse.ensureSchema();
         return {
           sms: {
             provider: new TwilioSmsProvider({
@@ -28,7 +18,7 @@ import {
               from: process.env.TWILIO_FROM!,
             }),
           },
-          stores: { verify, abuse },
+          stores,
           code: { length: 6, ttlSeconds: 600 },
           attempts: { max: 5, cooldownSeconds: 30 },
           rateLimit: {

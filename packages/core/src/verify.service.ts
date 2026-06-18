@@ -8,14 +8,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 
-class TooManyRequestsException extends HttpException {
-  constructor(response: string | Record<string, unknown>) {
-    super(response, HttpStatus.TOO_MANY_REQUESTS);
-  }
-}
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import type { Cache } from 'cache-manager';
-
 import { VERIFY_MODULE_OPTIONS } from './interfaces/module-options.interface.js';
 import type { VerifyModuleOptions } from './interfaces/module-options.interface.js';
 import type {
@@ -29,8 +21,12 @@ import {
   generateSid,
   hashCode,
 } from './code/code-gen.js';
-import { CacheRateLimiter } from './store/cache-rate-limiter.js';
-import { CooldownTracker } from './store/cooldown.js';
+
+class TooManyRequestsException extends HttpException {
+  constructor(response: string | Record<string, unknown>) {
+    super(response, HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
 
 export interface StartParams {
   to: string;
@@ -76,24 +72,17 @@ const DEFAULTS = {
 @Injectable()
 export class VerifyService {
   private readonly log = new Logger(VerifyService.name);
-  private readonly rateLimiter: CacheRateLimiter;
-  private readonly cooldown: CooldownTracker;
-  /** Resolves phone → most-recent sid, so check() doesn't need the sid. */
-  private readonly phoneIndexKey = (phone: string) => `verify:idx:${phone}`;
 
   constructor(
     @Inject(VERIFY_MODULE_OPTIONS)
     private readonly options: VerifyModuleOptions,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {
-    this.rateLimiter = new CacheRateLimiter(cache);
-    this.cooldown = new CooldownTracker(cache);
     if (options.logging?.verbose) {
       this.log.log('verbose logging enabled (logging.verbose = true)');
     }
     if (options.code?.fixedCode) {
       const env = process.env.NODE_ENV;
-      const msg = `⚠️  code.fixedCode is set ("${options.code.fixedCode}") — every verification will use this static code.`;
+      const msg = `code.fixedCode is set ("${options.code.fixedCode}"); every verification will use this static code.`;
       if (env === 'production') {
         this.log.error(msg + ' This is UNSAFE in production.');
       } else {
@@ -107,11 +96,13 @@ export class VerifyService {
     const channel = params.channel ?? 'sms';
     this.vlog(`start: phone=${this.redact(phone)} channel=${channel} ip=${params.ip ?? '-'}`);
 
-    if (await this.cooldown.isOnCooldown(phone)) {
-      this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)}`);
+    const cooldownMs = await this.options.stores.cooldown.remaining(phone);
+    if (cooldownMs > 0) {
+      this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)} remainingMs=${cooldownMs}`);
       throw new TooManyRequestsException({
         code: 'COOLDOWN_ACTIVE',
         message: 'A code was sent recently. Please wait before requesting another.',
+        retryAfterMs: cooldownMs,
       });
     }
 
@@ -143,17 +134,13 @@ export class VerifyService {
     };
 
     await this.options.stores.verify.create(record);
-    await this.cache.set(
-      this.phoneIndexKey(phone),
-      sid,
-      ttlSeconds * 1000,
-    );
+    await this.options.stores.phoneIndex.set(phone, sid, ttlSeconds);
 
     this.vlog(`start: persisted sid=${sid} attemptsMax=${maxAttempts} ttl=${ttlSeconds}s; dispatching code`);
     try {
       await this.sendCode(phone, code);
       this.vlog(`start: dispatched sid=${sid} via ${this.options.sms.provider.name}; cooldown=${cooldownSeconds}s`);
-      await this.cooldown.start(phone, cooldownSeconds);
+      await this.options.stores.cooldown.start(phone, cooldownSeconds);
       await this.options.stores.abuse?.recordSendAttempt({
         sid,
         phone,
@@ -164,6 +151,7 @@ export class VerifyService {
       });
     } catch (err) {
       await this.options.stores.verify.delete(sid);
+      await this.options.stores.phoneIndex.delete(phone);
       await this.options.stores.abuse?.recordSendAttempt({
         sid,
         phone,
@@ -190,7 +178,7 @@ export class VerifyService {
   async check(params: CheckParams): Promise<CheckResult> {
     const phone = this.normalizePhone(params.to);
     this.vlog(`check: phone=${this.redact(phone)} ip=${params.ip ?? '-'}`);
-    const sid = await this.cache.get<string>(this.phoneIndexKey(phone));
+    const sid = await this.options.stores.phoneIndex.get(phone);
     if (!sid) {
       throw new BadRequestException({
         code: 'NO_PENDING_VERIFICATION',
@@ -226,12 +214,12 @@ export class VerifyService {
     const match = constantTimeEqual(expectedHash, record.codeHash);
 
     if (match) {
-      this.vlog(`check: code matched sid=${sid} — approving`);
+      this.vlog(`check: code matched sid=${sid}; approving`);
       const transitioned = await this.options.stores.verify.markStatus(
         sid,
         'approved',
       );
-      await this.cache.del(this.phoneIndexKey(phone));
+      await this.options.stores.phoneIndex.delete(phone);
       return {
         sid,
         state: transitioned ? 'approved' : 'canceled',
@@ -247,7 +235,7 @@ export class VerifyService {
 
     if (outcome === 'locked-out') {
       this.vlog(`check: locked out sid=${sid} after exhausting attempts`);
-      await this.cache.del(this.phoneIndexKey(phone));
+      await this.options.stores.phoneIndex.delete(phone);
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
     this.vlog(`check: wrong code sid=${sid} attemptsRemaining=${attemptsRemaining}`);
@@ -285,28 +273,30 @@ export class VerifyService {
   ): Promise<void> {
     const perPhone =
       this.options.rateLimit?.perPhone ?? DEFAULTS.perPhone;
-    const phoneHits = await this.rateLimiter.hit(
-      'phone',
-      phone,
+    const phoneHit = await this.options.stores.rateLimit.hit(
+      `phone:${phone}`,
+      perPhone.count,
       perPhone.windowSeconds,
     );
-    if (phoneHits > perPhone.count) {
+    if (phoneHit.exceeded) {
       throw new TooManyRequestsException({
         code: 'PHONE_RATE_LIMITED',
         message: 'Too many verification requests for this number.',
+        resetAt: phoneHit.resetAt,
       });
     }
     if (ip) {
       const perIp = this.options.rateLimit?.perIp ?? DEFAULTS.perIp;
-      const ipHits = await this.rateLimiter.hit(
-        'ip',
-        ip,
+      const ipHit = await this.options.stores.rateLimit.hit(
+        `ip:${ip}`,
+        perIp.count,
         perIp.windowSeconds,
       );
-      if (ipHits > perIp.count) {
+      if (ipHit.exceeded) {
         throw new TooManyRequestsException({
           code: 'IP_RATE_LIMITED',
           message: 'Too many verification requests from this network.',
+          resetAt: ipHit.resetAt,
         });
       }
     }

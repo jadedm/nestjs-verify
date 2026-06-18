@@ -1,5 +1,18 @@
 # @jadedm/nestjs-verify-mongo
 
+## 0.3.0
+
+### Minor Changes (BREAKING)
+
+- Three new stores added to match the unified store architecture in core 0.3.0:
+  - `MongoRateLimitStore` with atomic counter-with-window via `findOneAndUpdate` plus an aggregation-pipeline update.
+  - `MongoCooldownStore` returning precise milliseconds remaining.
+  - `MongoPhoneIndexStore`.
+- New `createMongoStores` factory returns all five stores plus an optional `close()` helper for owned clients.
+- New `runMongoMigrations` runner using a sentinel document with `lockUntil` for concurrent-instance safety. Tracks version in a `verify_schema_versions` collection.
+- `MongoVerifyStore` and `MongoAbuseStore` no longer require a separate `ensureIndexes()` call. Index setup runs as part of the factory. The runner creates TTL indexes on `expiresAt` and `resetAt` for all three new collections.
+
+
 ## 0.2.0
 
 ### Minor Changes

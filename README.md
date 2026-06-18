@@ -1,38 +1,79 @@
 # nestjs-verify
 
-Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS provider and the store.
+Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS provider and the stores.
+
+## Migrating from 0.2.x to 0.3.0
+
+0.3.0 is a breaking change. The library no longer depends on `@nestjs/cache-manager`. State is now organized behind five store interfaces, with one adapter per backend.
+
+```diff
+- import { CacheModule } from '@nestjs/cache-manager';
+- import { MemoryVerifyStore, MemoryAbuseStore } from '@jadedm/nestjs-verify';
++ import { createMemoryStores } from '@jadedm/nestjs-verify';
+
+  @Module({
+    imports: [
+-     CacheModule.register({ isGlobal: true }),
+      VerifyModule.forRoot({
+        sms: { provider: ... },
+-       stores: {
+-         verify: new MemoryVerifyStore(),
+-         abuse:  new MemoryAbuseStore(),
+-       },
++       stores: createMemoryStores(),
+      }),
+    ],
+  })
+```
+
+For production, the migration is a single factory call per backend:
+
+```ts
+import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
+const stores = await createPostgresStores({ connectionString });
+VerifyModule.forRoot({ sms: { provider }, stores });
+```
+
+The factory runs idempotent migrations under an advisory lock. Existing `verifications` and `verify_abuse_log` tables are unchanged. Three new tables are created on first start: `verify_rate_limits`, `verify_cooldowns`, `verify_phone_index`. Mongo gets equivalent collections with TTL indexes.
+
+The wire shape of `/verify/start` and `/verify/check` is unchanged. The only newly-surfaced wire field is `retryAfterMs` on 429 cooldown responses.
+
+## Install
 
 ```bash
-pnpm add @jadedm/nestjs-verify @nestjs/cache-manager cache-manager
-pnpm add @jadedm/nestjs-verify-twilio   # or any other provider
-pnpm add @jadedm/nestjs-verify-postgres # or -mongo, or use the in-memory store for dev
+pnpm add @jadedm/nestjs-verify
+pnpm add @jadedm/nestjs-verify-twilio
+pnpm add @jadedm/nestjs-verify-postgres     # or -mongo, or -redis for ephemeral
 ```
 
 ## Packages
 
 | Package | Purpose |
 |---|---|
-| [`@jadedm/nestjs-verify`](./packages/core) | Core module, service, interfaces, code generation, in-memory stores, mock SMS provider |
+| [`@jadedm/nestjs-verify`](./packages/core) | Core module, service, five store interfaces, in-memory stores, mock SMS provider |
 | [`@jadedm/nestjs-verify-twilio`](./packages/provider-twilio) | Twilio SMS provider adapter with transient-error retry |
-| [`@jadedm/nestjs-verify-postgres`](./packages/store-postgres) | Postgres store, atomic `UPDATE ... RETURNING` |
-| [`@jadedm/nestjs-verify-mongo`](./packages/store-mongo) | MongoDB store, atomic aggregation pipeline update, native TTL index |
+| [`@jadedm/nestjs-verify-postgres`](./packages/store-postgres) | All five stores against Postgres. Atomic ops, migration runner with advisory lock |
+| [`@jadedm/nestjs-verify-mongo`](./packages/store-mongo) | All five stores against Mongo. Atomic ops via aggregation pipelines, TTL indexes |
+| [`@jadedm/nestjs-verify-redis`](./packages/store-redis) | Three ephemeral stores against Redis. Atomic INCR via Lua. Pair with a durable store. |
 
-All four packages publish independently to npm and version in lockstep via Changesets.
+All packages publish independently to npm and version in lockstep via Changesets.
 
 ## Quickstart
 
 ```ts
 import { Module } from '@nestjs/common';
-import { CacheModule } from '@nestjs/cache-manager';
-import { VerifyModule, MockSmsProvider, MemoryVerifyStore, MemoryAbuseStore } from '@jadedm/nestjs-verify';
+import {
+  VerifyModule,
+  MockSmsProvider,
+  createMemoryStores,
+} from '@jadedm/nestjs-verify';
 
 @Module({
   imports: [
-    CacheModule.register({ isGlobal: true }),
     VerifyModule.forRoot({
-      sms: { provider: new MockSmsProvider() },              // logs the code to stdout
-      stores: { verify: new MemoryVerifyStore(), abuse: new MemoryAbuseStore() },
-      code: { fixedCode: '123456' },                          // dev only: always use this code
+      sms: { provider: new MockSmsProvider() },
+      stores: createMemoryStores(),
+      code: { fixedCode: '123456' },     // dev only; loud warning at boot
     }),
   ],
 })
@@ -40,20 +81,18 @@ export class AppModule {}
 ```
 
 ```bash
-# start a verification
 curl -X POST http://localhost:3000/verify/start \
   -H 'Content-Type: application/json' \
   -d '{"to":"+14155552671"}'
 # 201 {"sid":"vr_...","state":"pending","channel":"sms","expiresAt":"..."}
 
-# check the code
 curl -X POST http://localhost:3000/verify/check \
   -H 'Content-Type: application/json' \
   -d '{"to":"+14155552671","code":"123456"}'
 # 201 {"sid":"vr_...","state":"approved","attemptsRemaining":0}
 ```
 
-For real deployments, replace `MockSmsProvider` with `TwilioSmsProvider` and the memory stores with `PostgresVerifyStore` / `MongoVerifyStore`.
+For production, swap `MockSmsProvider` for `TwilioSmsProvider` and `createMemoryStores()` for `await createPostgresStores({ connectionString })` (or `createMongoStores`, or a mix with `createRedisStores` for the ephemeral half).
 
 ## State machine
 

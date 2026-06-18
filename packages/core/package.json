@@ -1,7 +1,7 @@
 {
   "name": "@jadedm/nestjs-verify",
-  "version": "0.2.0",
-  "description": "Self-hosted Twilio Verify-style OTP for NestJS. Bring your own SMS provider.",
+  "version": "0.3.0",
+  "description": "Self-hosted Twilio Verify-style OTP for NestJS. Bring your own SMS provider and store.",
   "keywords": [
     "nestjs",
     "otp",
@@ -30,7 +30,8 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -44,18 +45,14 @@
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
-    "@nestjs/cache-manager": "^2.0.0 || ^3.0.0",
     "@nestjs/common": "^9.0.0 || ^10.0.0 || ^11.0.0",
     "@nestjs/core": "^9.0.0 || ^10.0.0 || ^11.0.0",
-    "cache-manager": "^5.0.0 || ^6.0.0",
     "reflect-metadata": "^0.1.13 || ^0.2.0",
     "rxjs": "^7.0.0"
   },
   "devDependencies": {
-    "@nestjs/cache-manager": "^2.2.0",
     "@nestjs/common": "^10.3.0",
     "@nestjs/core": "^10.3.0",
-    "cache-manager": "^5.4.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0"
   }

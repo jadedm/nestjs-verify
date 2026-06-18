@@ -1,40 +1,54 @@
 # @jadedm/nestjs-verify
 
-Self-hosted Twilio-Verify-style OTP for NestJS. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You bring the SMS provider and the store.
+Self-hosted Twilio-Verify-style OTP for NestJS. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You bring the SMS provider and the stores.
 
 ```bash
-pnpm add @jadedm/nestjs-verify @nestjs/cache-manager cache-manager
-# + at least one provider and one store, e.g.
+pnpm add @jadedm/nestjs-verify
+# + at least one provider and one store-adapter package
 pnpm add @jadedm/nestjs-verify-twilio @jadedm/nestjs-verify-postgres
 ```
 
-## Minimal wiring
+## Minimal wiring (dev)
 
 ```ts
 import { Module } from '@nestjs/common';
-import { CacheModule } from '@nestjs/cache-manager';
-import { VerifyModule, MemoryVerifyStore, MemoryAbuseStore } from '@jadedm/nestjs-verify';
-import { TwilioSmsProvider } from '@jadedm/nestjs-verify-twilio';
+import {
+  VerifyModule,
+  MockSmsProvider,
+  createMemoryStores,
+} from '@jadedm/nestjs-verify';
 
 @Module({
   imports: [
-    CacheModule.register({ isGlobal: true }),
     VerifyModule.forRoot({
-      sms: {
-        provider: new TwilioSmsProvider({
-          accountSid: process.env.TWILIO_ACCOUNT_SID!,
-          authToken:  process.env.TWILIO_AUTH_TOKEN!,
-          from:       process.env.TWILIO_FROM!,
-        }),
-      },
-      stores: {
-        verify: new MemoryVerifyStore(),   // swap for Postgres / Mongo in prod
-        abuse:  new MemoryAbuseStore(),
-      },
+      sms: { provider: new MockSmsProvider() },
+      stores: createMemoryStores(),
+      code: { fixedCode: '123456' },   // dev only; warns at boot
     }),
   ],
 })
 export class AppModule {}
+```
+
+## Production wiring
+
+```ts
+import { VerifyModule } from '@jadedm/nestjs-verify';
+import { TwilioSmsProvider } from '@jadedm/nestjs-verify-twilio';
+import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
+
+VerifyModule.forRootAsync({
+  useFactory: async () => ({
+    sms: {
+      provider: new TwilioSmsProvider({
+        accountSid: process.env.TWILIO_ACCOUNT_SID!,
+        authToken:  process.env.TWILIO_AUTH_TOKEN!,
+        from:       process.env.TWILIO_FROM!,
+      }),
+    },
+    stores: await createPostgresStores({ connectionString: process.env.DATABASE_URL! }),
+  }),
+});
 ```
 
 That's it. Two routes are mounted automatically:
@@ -53,31 +67,51 @@ POST /verify/check   { "to": "+14155552671", "code": "123456" }
 VerifyModule.forRootAsync({
   inject: [ConfigService],
   useFactory: (c) => ({
-    sms: { provider: ..., fallbacks: [...] },     // primary + fallback chain
-    stores: { verify, abuse },
-    code:       { length: 6, ttlSeconds: 600 },
+    sms: { provider: ..., fallbacks: [...] },
+    stores: {
+      verify, abuse,        // durable
+      rateLimit, cooldown, phoneIndex,   // ephemeral
+    },
+    code:       { length: 6, ttlSeconds: 600, fixedCode: undefined },
     attempts:   { max: 5, cooldownSeconds: 30 },
     rateLimit:  { perPhone: { count: 5, windowSeconds: 3600 } },
     abuse:      { maxDistinctPhonesPerIp: 10, velocityWindowSeconds: 300 },
     messageTemplate: 'Your code is {{code}}',
-    registerController: true,                     // false = handle routing yourself
+    registerController: true,
+    logging:    { verbose: false },
   }),
 })
 ```
 
+## The five stores
+
+The architectural shape of 0.3.0 onward. Every piece of state lives behind a store interface.
+
+| Store | What it holds | Backed by |
+|---|---|---|
+| `VerifyStore` | Pending and terminal verification records, the source of truth | Postgres, Mongo |
+| `AbuseStore` | Send-attempt history for IP/phone velocity heuristics. Optional. | Postgres, Mongo |
+| `RateLimitStore` | Fixed-window counter per phone and per IP. Atomic. | Postgres, Mongo, Redis |
+| `CooldownStore` | Per-phone cooldown between sends. Returns ms remaining. | Postgres, Mongo, Redis |
+| `PhoneIndexStore` | Phone -> sid lookup so check() does not need the sid | Postgres, Mongo, Redis |
+
+You can use a single backend for all five, or split durable vs ephemeral (Postgres for `verify` and `abuse`, Redis for the other three) for speed.
+
 ## Peers
 
 - `@nestjs/common`, `@nestjs/core`: 9, 10, or 11
-- `@nestjs/cache-manager`: 2 or 3
-- `cache-manager`: 5 or 6 (with `@nestjs/cache-manager@2`, use 5; with 3, use 6)
+- `reflect-metadata`, `rxjs`
 
-## Provider & store adapters
+No `@nestjs/cache-manager` peer dep. State is managed through the store interfaces.
+
+## Provider and store adapters
 
 | Concern | Package |
 |---|---|
 | Twilio SMS | [`@jadedm/nestjs-verify-twilio`](https://www.npmjs.com/package/@jadedm/nestjs-verify-twilio) |
-| Postgres store | [`@jadedm/nestjs-verify-postgres`](https://www.npmjs.com/package/@jadedm/nestjs-verify-postgres) |
-| Mongo store | [`@jadedm/nestjs-verify-mongo`](https://www.npmjs.com/package/@jadedm/nestjs-verify-mongo) |
+| Postgres (all 5 stores) | [`@jadedm/nestjs-verify-postgres`](https://www.npmjs.com/package/@jadedm/nestjs-verify-postgres) |
+| Mongo (all 5 stores) | [`@jadedm/nestjs-verify-mongo`](https://www.npmjs.com/package/@jadedm/nestjs-verify-mongo) |
+| Redis (rate limit, cooldown, phone index) | [`@jadedm/nestjs-verify-redis`](https://www.npmjs.com/package/@jadedm/nestjs-verify-redis) |
 
 Bring your own: implement `SmsProvider` for a new SMS vendor or `VerifyStore` / `AbuseStore` for a different database. The interfaces are tiny and re-exported from this package.
 

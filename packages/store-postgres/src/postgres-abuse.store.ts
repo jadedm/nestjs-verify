@@ -1,6 +1,5 @@
 import type { AbuseStore, SendAttempt } from '@jadedm/nestjs-verify';
 import { Pool, PoolConfig } from 'pg';
-import { ABUSE_TABLE_DDL } from './schema.js';
 
 export interface PostgresAbuseStoreOptions {
   connectionString?: string;
@@ -26,10 +25,6 @@ export class PostgresAbuseStore implements AbuseStore {
       );
     }
     this.table = opts.tableName ?? 'verify_abuse_log';
-  }
-
-  async ensureSchema(): Promise<void> {
-    await this.pool.query(ABUSE_TABLE_DDL);
   }
 
   async recordSendAttempt(s: SendAttempt): Promise<void> {

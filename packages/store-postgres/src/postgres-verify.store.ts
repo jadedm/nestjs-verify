@@ -5,7 +5,6 @@ import type {
   VerifyStore,
 } from '@jadedm/nestjs-verify';
 import { Pool, PoolConfig } from 'pg';
-import { VERIFICATIONS_TABLE_DDL } from './schema.js';
 
 export interface PostgresVerifyStoreOptions {
   connectionString?: string;
@@ -44,11 +43,6 @@ export class PostgresVerifyStore implements VerifyStore {
       );
     }
     this.table = opts.tableName ?? 'verifications';
-  }
-
-  /** Idempotent. Call once at module init. */
-  async ensureSchema(): Promise<void> {
-    await this.pool.query(VERIFICATIONS_TABLE_DDL);
   }
 
   async create(v: VerificationRecord): Promise<void> {

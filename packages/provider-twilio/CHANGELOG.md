@@ -1,5 +1,12 @@
 # @jadedm/nestjs-verify-twilio
 
+## 0.3.0
+
+### Minor Changes (BREAKING)
+
+- Released alongside `@jadedm/nestjs-verify` 0.3.0, which dropped `@nestjs/cache-manager` and introduced three new store interfaces (`RateLimitStore`, `CooldownStore`, `PhoneIndexStore`). This package is unchanged in code but its peer range now points at core 0.3.x and the version was bumped to keep the linked group aligned.
+
+
 ## 0.2.0
 
 ### Minor Changes

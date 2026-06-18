@@ -2,6 +2,9 @@ import { ModuleMetadata, Type } from '@nestjs/common';
 import { SmsProvider } from './sms-provider.interface.js';
 import { VerifyStore } from './verify-store.interface.js';
 import { AbuseStore } from './abuse-store.interface.js';
+import { RateLimitStore } from './rate-limit-store.interface.js';
+import { CooldownStore } from './cooldown-store.interface.js';
+import { PhoneIndexStore } from './phone-index-store.interface.js';
 
 export interface RateLimitPolicy {
   count: number;
@@ -17,6 +20,9 @@ export interface VerifyModuleOptions {
   stores: {
     verify: VerifyStore;
     abuse?: AbuseStore;
+    rateLimit: RateLimitStore;
+    cooldown: CooldownStore;
+    phoneIndex: PhoneIndexStore;
   };
   code?: {
     /** Digits per OTP. Default 6. */

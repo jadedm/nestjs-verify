@@ -1,5 +1,31 @@
 # @jadedm/nestjs-verify
 
+## 0.3.0
+
+### Minor Changes (BREAKING)
+
+- Architectural unification of state stores. `@nestjs/cache-manager` and `cache-manager` are no longer peer dependencies. All state now lives behind five store interfaces in core, with one adapter per backend.
+
+  New interfaces:
+
+  - `RateLimitStore` with an atomic `hit(key, limit, windowSeconds)` returning `{ count, limit, exceeded, resetAt }`. Implementations MUST be atomic across instances when backed by a shared store.
+  - `CooldownStore` with `remaining(key)` returning ms remaining and `start(key, seconds)`.
+  - `PhoneIndexStore` with `set`, `get`, `delete` and a TTL.
+
+  Module configuration shape change:
+
+  - `stores.rateLimit`, `stores.cooldown`, `stores.phoneIndex` are now required.
+  - `stores.abuse` remains optional.
+  - `@nestjs/cache-manager`'s `CacheModule.register` no longer needs to be imported.
+
+  Migration path: replace `CacheModule.register` and individual store constructors with a single factory call: `createMemoryStores()` for dev, `createPostgresStores({ connectionString })` for Postgres, `createMongoStores({ uri, databaseName })` for Mongo, or mix and match (Postgres durable + Redis ephemeral via `createRedisStores({ client: ioredis })`).
+
+  Other changes in 0.3.0:
+
+  - `package.json` now includes `"./package.json"` in the exports map so consumers can read the installed version programmatically.
+  - The `fixedCode` boot warning no longer contains an emoji or em dash; renders cleanly across all log surfaces.
+  - 14 new unit tests covering the three new memory stores.
+
 ## 0.2.0
 
 ### Minor Changes
