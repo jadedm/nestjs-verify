@@ -5,6 +5,7 @@ export * from './controllers/verify.controller.js';
 export * from './controllers/dto.js';
 export * from './store/memory-verify.store.js';
 export * from './store/memory-abuse.store.js';
+export * from './providers/mock-sms.provider.js';
 export {
   constantTimeEqual,
   generateCode,

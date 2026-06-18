@@ -1,19 +1,20 @@
 {
-  "name": "@jadedm/nestjs-verify-postgres",
+  "name": "@jadedm/nestjs-verify-mongo",
   "version": "0.2.0",
-  "description": "Postgres store adapter for @jadedm/nestjs-verify (verifications + abuse log).",
+  "description": "MongoDB store adapter for @jadedm/nestjs-verify (verifications + abuse log).",
   "keywords": [
     "nestjs",
     "otp",
     "verify",
-    "postgres"
+    "mongodb",
+    "mongo"
   ],
   "license": "MIT",
   "author": "jadedm <jadedmanish@gmail.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/jadedm/nestjs-verify.git",
-    "directory": "packages/store-postgres"
+    "directory": "packages/store-mongo"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -43,11 +44,10 @@
   },
   "peerDependencies": {
     "@jadedm/nestjs-verify": "workspace:^",
-    "pg": "^8.11.0"
+    "mongodb": "^5.0.0 || ^6.0.0"
   },
   "devDependencies": {
     "@jadedm/nestjs-verify": "workspace:*",
-    "@types/pg": "^8.11.0",
-    "pg": "^8.11.0"
+    "mongodb": "^6.5.0"
   }
 }

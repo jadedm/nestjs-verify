@@ -1,4 +1,4 @@
-# @jadedm/nestjs-verify
+# @jadedm/nestjs-verify-mongo
 
 ## 0.2.0
 
@@ -33,8 +33,7 @@
   - Per-package READMEs added. Each ships with its npm tarball.
   - Root README rewritten with a state diagram, a comparison table against Twilio Verify, and a maturity section that catalogs gaps for the 1.0 milestone.
 
-## 0.1.0
+### Patch Changes
 
-### Minor Changes
-
-- d13fda2: Initial release. Self-hosted Twilio Verify-style OTP for NestJS with Twilio SMS provider and Postgres store.
+- Updated dependencies
+  - @jadedm/nestjs-verify@0.2.0

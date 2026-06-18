@@ -23,6 +23,12 @@ export interface VerifyModuleOptions {
     length?: number;
     /** Time the code stays valid. Default 600s. */
     ttlSeconds?: number;
+    /**
+     * **Development/testing only.** When set, every verification uses this
+     * code instead of generating a random one. Logs a loud warning at boot.
+     * Never set this in production.
+     */
+    fixedCode?: string;
   };
   attempts?: {
     /** Max wrong codes before lockout. Default 5. */
@@ -43,6 +49,16 @@ export interface VerifyModuleOptions {
   registerController?: boolean;
   /** Body template. {{code}} is replaced. */
   messageTemplate?: string;
+  logging?: {
+    /**
+     * Emit detailed step-by-step logs for every verification (rate-limit hits,
+     * code dispatch, attempt counts, etc.). When false (default), these only
+     * surface if Nest is started with logger: ['verbose', ...]. When true,
+     * they always emit at `log` level — useful for debugging without
+     * touching the global Nest log config.
+     */
+    verbose?: boolean;
+  };
 }
 
 export interface VerifyModuleAsyncOptions

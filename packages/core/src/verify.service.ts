@@ -40,7 +40,11 @@ export interface StartParams {
 
 export interface StartResult {
   sid: string;
-  status: 'pending';
+  /**
+   * Verification state on the wire. Distinct field name from `status` to
+   * avoid collision with JSend-style envelopes ({ status: "success", ... }).
+   */
+  state: 'pending';
   channel: VerificationChannel;
   expiresAt: Date;
 }
@@ -53,7 +57,7 @@ export interface CheckParams {
 
 export interface CheckResult {
   sid: string;
-  status: 'approved' | 'pending' | 'canceled';
+  state: 'approved' | 'pending' | 'canceled';
   attemptsRemaining: number;
 }
 
@@ -84,13 +88,27 @@ export class VerifyService {
   ) {
     this.rateLimiter = new CacheRateLimiter(cache);
     this.cooldown = new CooldownTracker(cache);
+    if (options.logging?.verbose) {
+      this.log.log('verbose logging enabled (logging.verbose = true)');
+    }
+    if (options.code?.fixedCode) {
+      const env = process.env.NODE_ENV;
+      const msg = `⚠️  code.fixedCode is set ("${options.code.fixedCode}") — every verification will use this static code.`;
+      if (env === 'production') {
+        this.log.error(msg + ' This is UNSAFE in production.');
+      } else {
+        this.log.warn(msg);
+      }
+    }
   }
 
   async start(params: StartParams): Promise<StartResult> {
     const phone = this.normalizePhone(params.to);
     const channel = params.channel ?? 'sms';
+    this.vlog(`start: phone=${this.redact(phone)} channel=${channel} ip=${params.ip ?? '-'}`);
 
     if (await this.cooldown.isOnCooldown(phone)) {
+      this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)}`);
       throw new TooManyRequestsException({
         code: 'COOLDOWN_ACTIVE',
         message: 'A code was sent recently. Please wait before requesting another.',
@@ -107,7 +125,7 @@ export class VerifyService {
     const cooldownSeconds =
       this.options.attempts?.cooldownSeconds ?? DEFAULTS.cooldownSeconds;
 
-    const code = generateCode(codeLength);
+    const code = this.options.code?.fixedCode ?? generateCode(codeLength);
     const salt = generateSalt();
     const sid = generateSid();
     const now = new Date();
@@ -131,8 +149,10 @@ export class VerifyService {
       ttlSeconds * 1000,
     );
 
+    this.vlog(`start: persisted sid=${sid} attemptsMax=${maxAttempts} ttl=${ttlSeconds}s; dispatching code`);
     try {
       await this.sendCode(phone, code);
+      this.vlog(`start: dispatched sid=${sid} via ${this.options.sms.provider.name}; cooldown=${cooldownSeconds}s`);
       await this.cooldown.start(phone, cooldownSeconds);
       await this.options.stores.abuse?.recordSendAttempt({
         sid,
@@ -161,7 +181,7 @@ export class VerifyService {
 
     return {
       sid,
-      status: 'pending',
+      state: 'pending',
       channel,
       expiresAt: record.expiresAt,
     };
@@ -169,6 +189,7 @@ export class VerifyService {
 
   async check(params: CheckParams): Promise<CheckResult> {
     const phone = this.normalizePhone(params.to);
+    this.vlog(`check: phone=${this.redact(phone)} ip=${params.ip ?? '-'}`);
     const sid = await this.cache.get<string>(this.phoneIndexKey(phone));
     if (!sid) {
       throw new BadRequestException({
@@ -188,7 +209,7 @@ export class VerifyService {
     if (record.status !== 'pending') {
       return {
         sid,
-        status: record.status === 'approved' ? 'approved' : 'canceled',
+        state: record.status === 'approved' ? 'approved' : 'canceled',
         attemptsRemaining: 0,
       };
     }
@@ -205,6 +226,7 @@ export class VerifyService {
     const match = constantTimeEqual(expectedHash, record.codeHash);
 
     if (match) {
+      this.vlog(`check: code matched sid=${sid} — approving`);
       const transitioned = await this.options.stores.verify.markStatus(
         sid,
         'approved',
@@ -212,7 +234,7 @@ export class VerifyService {
       await this.cache.del(this.phoneIndexKey(phone));
       return {
         sid,
-        status: transitioned ? 'approved' : 'canceled',
+        state: transitioned ? 'approved' : 'canceled',
         attemptsRemaining: 0,
       };
     }
@@ -224,10 +246,12 @@ export class VerifyService {
       : 0;
 
     if (outcome === 'locked-out') {
+      this.vlog(`check: locked out sid=${sid} after exhausting attempts`);
       await this.cache.del(this.phoneIndexKey(phone));
-      return { sid, status: 'canceled', attemptsRemaining: 0 };
+      return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
-    return { sid, status: 'pending', attemptsRemaining };
+    this.vlog(`check: wrong code sid=${sid} attemptsRemaining=${attemptsRemaining}`);
+    return { sid, state: 'pending', attemptsRemaining };
   }
 
   private async sendCode(phone: string, code: string): Promise<void> {
@@ -324,5 +348,15 @@ export class VerifyService {
 
   private redact(phone: string): string {
     return phone.slice(0, 4) + '***' + phone.slice(-2);
+  }
+
+  /**
+   * Operational checkpoint log. Emits at `log` level when
+   * `logging.verbose === true`, otherwise at `verbose` level (visible only
+   * when Nest's logger includes 'verbose').
+   */
+  private vlog(message: string): void {
+    if (this.options.logging?.verbose) this.log.log(message);
+    else this.log.verbose(message);
   }
 }
