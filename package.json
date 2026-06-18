@@ -21,12 +21,17 @@
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && changeset publish",
+    "test:adapters": "docker compose -f scripts/docker-compose.smoke.yml up -d --wait && pnpm build && node scripts/smoke-adapters.mjs; ec=$?; docker compose -f scripts/docker-compose.smoke.yml down -v; exit $ec"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
+    "@jadedm/nestjs-verify-mongo": "workspace:*",
+    "@jadedm/nestjs-verify-postgres": "workspace:*",
     "@swc/core": "^1.15.41",
     "@types/node": "^20.11.0",
+    "mongodb": "^6.5.0",
+    "pg": "^8.11.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"

@@ -97,11 +97,14 @@ Beta. The cryptographic primitives are sound and the store atomicity is correct.
 ```bash
 pnpm install
 pnpm build
-pnpm test
+pnpm test                # unit tests across all packages
+pnpm test:adapters       # live integration smoke against Postgres + Mongo (needs Docker)
 pnpm --filter basic-twilio-postgres start
 ```
 
 The runnable example in `examples/basic-twilio-postgres` wires the core, the Twilio provider, and the Postgres store together.
+
+`pnpm test:adapters` spins up Postgres 16 and Mongo 7 in Docker, runs the adapter contract script in `scripts/smoke-adapters.mjs`, and tears the containers down. It is the safest pre-release check for any change that touches a store adapter. See `scripts/README.md` for details.
 
 ## Releases
 

@@ -14,12 +14,24 @@ importers:
       '@changesets/cli':
         specifier: ^2.27.0
         version: 2.31.0(@types/node@20.19.43)
+      '@jadedm/nestjs-verify-mongo':
+        specifier: workspace:*
+        version: link:packages/store-mongo
+      '@jadedm/nestjs-verify-postgres':
+        specifier: workspace:*
+        version: link:packages/store-postgres
       '@swc/core':
         specifier: ^1.15.41
         version: 1.15.41
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.43
+      mongodb:
+        specifier: ^6.5.0
+        version: 6.21.0
+      pg:
+        specifier: ^8.11.0
+        version: 8.21.0
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(@swc/core@1.15.41)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)
