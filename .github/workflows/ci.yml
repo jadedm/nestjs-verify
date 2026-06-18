@@ -15,9 +15,13 @@ jobs:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      # Build first so each package's dist/.d.ts exists. Downstream packages
+      # (provider-twilio, store-postgres, store-mongo) import types from
+      # @jadedm/nestjs-verify via its package.json "types" field, which
+      # points at dist/index.d.ts.
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm test
