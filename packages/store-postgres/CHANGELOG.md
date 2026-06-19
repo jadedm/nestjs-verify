@@ -1,5 +1,13 @@
 # @jadedm/nestjs-verify-postgres
 
+## 0.5.0
+
+### Minor Changes
+
+- New `PostgresAuditSink` implementing the `AuditSink` interface added in `@jadedm/nestjs-verify` 0.5.0. Stores lifecycle events in a new `verify_audit_log` table with `JSONB` meta.
+- Migration 002 creates `verify_audit_log` and three supporting indexes (`ts DESC`, `sid`, `(type, ts DESC)`). Runs automatically via the existing `runMigrations` runner under `pg_try_advisory_lock`.
+- `createPostgresStores` factory now returns `audit` as part of the stores bundle. Wire it via `stores.audit` on `VerifyModule.forRoot`.
+
 ## 0.4.0
 
 ### Minor Changes

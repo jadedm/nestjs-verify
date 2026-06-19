@@ -4,6 +4,7 @@ import { PostgresAbuseStore } from './postgres-abuse.store.js';
 import { PostgresRateLimitStore } from './postgres-rate-limit.store.js';
 import { PostgresCooldownStore } from './postgres-cooldown.store.js';
 import { PostgresPhoneIndexStore } from './postgres-phone-index.store.js';
+import { PostgresAuditSink } from './postgres-audit.sink.js';
 import { runMigrations, RunMigrationsOptions } from './migration-runner.js';
 
 export interface CreatePostgresStoresOptions extends RunMigrationsOptions {
@@ -18,6 +19,7 @@ export interface PostgresStores {
   rateLimit: PostgresRateLimitStore;
   cooldown: PostgresCooldownStore;
   phoneIndex: PostgresPhoneIndexStore;
+  audit: PostgresAuditSink;
   /** The shared pg.Pool. Use this to close cleanly on shutdown. */
   pool: Pool;
 }
@@ -55,6 +57,7 @@ export async function createPostgresStores(
     rateLimit: new PostgresRateLimitStore({ pool }),
     cooldown: new PostgresCooldownStore({ pool }),
     phoneIndex: new PostgresPhoneIndexStore({ pool }),
+    audit: new PostgresAuditSink({ pool }),
     pool,
   };
 }

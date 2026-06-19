@@ -68,4 +68,28 @@ export const MIGRATIONS: Migration[] = [
         ON verify_phone_index (expires_at);
     `,
   },
+  {
+    version: 2,
+    description: 'audit log table for AuditSink events',
+    sql: `
+      CREATE TABLE IF NOT EXISTS verify_audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        sid TEXT,
+        phone_redacted TEXT NOT NULL,
+        ip TEXT,
+        channel TEXT NOT NULL,
+        provider TEXT,
+        outcome TEXT,
+        ts TIMESTAMPTZ NOT NULL,
+        meta JSONB
+      );
+      CREATE INDEX IF NOT EXISTS verify_audit_log_ts_idx
+        ON verify_audit_log (ts DESC);
+      CREATE INDEX IF NOT EXISTS verify_audit_log_sid_idx
+        ON verify_audit_log (sid);
+      CREATE INDEX IF NOT EXISTS verify_audit_log_type_ts_idx
+        ON verify_audit_log (type, ts DESC);
+    `,
+  },
 ];

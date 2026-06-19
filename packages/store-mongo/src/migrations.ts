@@ -37,4 +37,18 @@ export const MIGRATIONS: MongoMigration[] = [
       ]);
     },
   },
+  {
+    version: 2,
+    description: 'audit log collection for AuditSink events',
+    apply: async (db) => {
+      const audit = db.collection('verify_audit_log');
+      await Promise.all([
+        // Default 90-day TTL on audit log. Adopters who need longer
+        // retention should drop and recreate the index themselves.
+        audit.createIndex({ ts: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 90 }),
+        audit.createIndex({ sid: 1 }),
+        audit.createIndex({ type: 1, ts: -1 }),
+      ]);
+    },
+  },
 ];

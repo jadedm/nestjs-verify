@@ -5,6 +5,7 @@ import { AbuseStore } from './abuse-store.interface.js';
 import { RateLimitStore } from './rate-limit-store.interface.js';
 import { CooldownStore } from './cooldown-store.interface.js';
 import { PhoneIndexStore } from './phone-index-store.interface.js';
+import { AuditSink } from './audit-sink.interface.js';
 
 export interface RateLimitPolicy {
   count: number;
@@ -23,6 +24,37 @@ export interface VerifyModuleOptions {
     rateLimit: RateLimitStore;
     cooldown: CooldownStore;
     phoneIndex: PhoneIndexStore;
+    /**
+     * Optional. When provided, lifecycle events for every verification
+     * (started, dispatched, approved, canceled, rate-limited, abuse-detected)
+     * are emitted to this sink.
+     */
+    audit?: AuditSink;
+  };
+  observability?: {
+    tracing?: {
+      /**
+       * 'auto' (default): use any OpenTelemetry SDK registered in the host
+       * application. If no SDK is registered, the no-op tracer runs and
+       * spans are not emitted. Zero config in either case.
+       * true: same as 'auto'.
+       * false: never emit spans, skip even the no-op overhead.
+       */
+      enabled?: 'auto' | boolean;
+      /** Service name attribute on every span. Default 'nestjs-verify'. */
+      serviceName?: string;
+    };
+    metrics?: {
+      /** Default false. Opt in explicitly. */
+      enabled?: boolean;
+      /**
+       * Pass an existing prom-client Registry. If absent, a new one is
+       * created and exposed via VerifyService.getMetricsRegistry().
+       */
+      registry?: unknown;
+      /** Counter / histogram name prefix. Default 'verify_'. */
+      prefix?: string;
+    };
   };
   code?: {
     /** Digits per OTP. Default 6. */

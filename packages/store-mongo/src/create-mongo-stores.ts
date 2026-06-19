@@ -4,6 +4,7 @@ import { MongoAbuseStore } from './mongo-abuse.store.js';
 import { MongoRateLimitStore } from './mongo-rate-limit.store.js';
 import { MongoCooldownStore } from './mongo-cooldown.store.js';
 import { MongoPhoneIndexStore } from './mongo-phone-index.store.js';
+import { MongoAuditSink } from './mongo-audit.sink.js';
 import { runMongoMigrations, RunMigrationsOptions } from './migration-runner.js';
 
 export interface CreateMongoStoresOptions extends RunMigrationsOptions {
@@ -19,6 +20,7 @@ export interface MongoStores {
   rateLimit: MongoRateLimitStore;
   cooldown: MongoCooldownStore;
   phoneIndex: MongoPhoneIndexStore;
+  audit: MongoAuditSink;
   /** Present only when the factory created its own MongoClient. Call close() on shutdown. */
   close?: () => Promise<void>;
 }
@@ -59,6 +61,7 @@ export async function createMongoStores(
     rateLimit: new MongoRateLimitStore({ db }),
     cooldown: new MongoCooldownStore({ db }),
     phoneIndex: new MongoPhoneIndexStore({ db }),
+    audit: new MongoAuditSink({ db }),
     close: ownedClient ? () => ownedClient!.close() : undefined,
   };
 }

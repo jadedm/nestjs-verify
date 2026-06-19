@@ -3,6 +3,7 @@ export * from './mongo-abuse.store.js';
 export * from './mongo-rate-limit.store.js';
 export * from './mongo-cooldown.store.js';
 export * from './mongo-phone-index.store.js';
+export * from './mongo-audit.sink.js';
 export * from './create-mongo-stores.js';
 export * from './migration-runner.js';
 export * from './migrations.js';

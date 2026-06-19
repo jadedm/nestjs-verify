@@ -123,6 +123,31 @@ async function exercisePhoneIndexStore(name, phoneIndex) {
   assert((await phoneIndex.get(`idx:${name}:+91`)) === null, 'delete clears entry');
 }
 
+async function exerciseAuditSink(name, audit) {
+  console.log(`\n--- ${name} AuditSink ---`);
+  const ts = new Date();
+  await audit.record({
+    type: 'verification_started',
+    sid: `audit_${name}_1`,
+    phoneRedacted: '+91***10',
+    ip: '203.0.113.7',
+    channel: 'sms',
+    ts,
+  });
+  await audit.record({
+    type: 'code_dispatched',
+    sid: `audit_${name}_1`,
+    phoneRedacted: '+91***10',
+    ip: '203.0.113.7',
+    channel: 'sms',
+    provider: 'mock',
+    ts,
+    meta: { latencyMs: 12 },
+  });
+  // No public read API on the sink interface; just assert no throw on insert.
+  console.log('  ok: recorded 2 events without error');
+}
+
 async function main() {
   // ---- Postgres: all 5 stores ----
   console.log('=== Postgres ===');
@@ -132,6 +157,7 @@ async function main() {
   await exerciseRateLimitStore('Postgres', pg.rateLimit);
   await exerciseCooldownStore('Postgres', pg.cooldown);
   await exercisePhoneIndexStore('Postgres', pg.phoneIndex);
+  await exerciseAuditSink('Postgres', pg.audit);
   await pg.pool.end();
 
   // ---- Mongo: all 5 stores ----
@@ -142,6 +168,7 @@ async function main() {
   await exerciseRateLimitStore('Mongo', mg.rateLimit);
   await exerciseCooldownStore('Mongo', mg.cooldown);
   await exercisePhoneIndexStore('Mongo', mg.phoneIndex);
+  await exerciseAuditSink('Mongo', mg.audit);
   await mg.close?.();
 
   // ---- Redis: 3 ephemeral stores ----

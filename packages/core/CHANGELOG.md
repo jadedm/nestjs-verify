@@ -1,5 +1,33 @@
 # @jadedm/nestjs-verify
 
+## 0.5.0
+
+### Minor Changes
+
+- Observability release. Audit, tracing, and metrics. No wire-shape breaking changes; the store-interfaces gain one new optional field (`stores.audit`).
+
+- New `AuditSink` interface in core, with three in-core implementations:
+  - `MemoryAuditSink` for tests, captures events in an array.
+  - `StdoutAuditSink` writes one JSON line per event.
+  - `LoggerAuditSink` writes through Nest's Logger so events appear in whatever stream the host application configures.
+- Lifecycle events emitted at every state transition: `verification_started`, `code_dispatched`, `verification_approved`, `verification_canceled`, `verification_expired`, `rate_limited`, `abuse_detected`. Each carries phone-redacted, ip, channel, provider, outcome, and arbitrary `meta`.
+- `stores.audit` is optional; if absent, no events emit and no overhead is incurred. Sink failures are caught and logged at WARN level so a flaky sink never breaks a verification.
+
+- OpenTelemetry tracing, auto-detect.
+  - `@opentelemetry/api` is now a required peer dep (~3kb, no-op tracer at runtime if no SDK registered).
+  - Spans at `verify.start`, `verify.check`, `verify.send_code` with attributes (`verify.phone_redacted`, `verify.channel`, `verify.sid`, `verify.provider`, `http.client_ip`). Exceptions recorded on the span, status set appropriately.
+  - Service name configurable via `observability.tracing.serviceName`. Default tracker version auto-synced to the package version via a tsup build-time define.
+  - All span names and attribute keys live in a `TELEMETRY` constants module for easy override.
+
+- Prometheus metrics, opt-in.
+  - `prom-client` is an optional peer dep. Required only when `observability.metrics.enabled: true`.
+  - Metrics: `verify_starts_total`, `verify_starts_blocked_total{reason}`, `verify_checks_total{outcome}`, `verify_phone_rate_limit_hits_total`, histograms `verify_sms_send_duration_seconds{provider,outcome}` and `verify_check_duration_seconds`.
+  - `VerifyService.getMetricsRegistry()` returns the prom-client Registry so adopters can wire it to their own `/metrics` controller.
+  - Block reasons, check outcomes, and SMS outcomes exported as constants (`BLOCK_REASON`, `CHECK_OUTCOME`, `SMS_OUTCOME`) for type-safe label values.
+
+- Other:
+  - New `TELEMETRY` and `METRICS` constants modules. Span names, attribute keys, metric names, and label keys are no longer string literals scattered through the service.
+
 ## 0.4.0
 
 ### Minor Changes

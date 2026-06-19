@@ -1,5 +1,13 @@
 # @jadedm/nestjs-verify-mongo
 
+## 0.5.0
+
+### Minor Changes
+
+- New `MongoAuditSink` implementing the `AuditSink` interface added in `@jadedm/nestjs-verify` 0.5.0. Stores lifecycle events in a new `verify_audit_log` collection.
+- Migration 002 creates the collection with a 90-day TTL index on `ts`, plus single-field indexes on `sid` and `(type, ts DESC)`. Runs automatically via the existing sentinel-locked runner.
+- `createMongoStores` factory now returns `audit` as part of the stores bundle.
+
 ## 0.4.0
 
 ### Minor Changes

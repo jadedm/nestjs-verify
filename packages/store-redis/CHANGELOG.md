@@ -1,5 +1,12 @@
 # @jadedm/nestjs-verify-redis
 
+## 0.5.0
+
+### Minor Changes
+
+- Released alongside `@jadedm/nestjs-verify` 0.5.0 (observability: AuditSink interface + Logger/Stdout/Memory sinks; OpenTelemetry tracing on verify.start, verify.check, verify.send_code; Prometheus metrics opt-in via prom-client). No functional change in this package; version bumped to keep the linked group aligned.
+
+
 ## 0.4.0
 
 ### Minor Changes
