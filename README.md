@@ -166,3 +166,9 @@ If you need integration help, custom provider or store adapters, NestJS architec
 ## License
 
 MIT. Manish Jadhav ([@jadedm](https://github.com/jadedm)).
+
+---
+
+**Built by [Manish Jadhav](https://manishj.com)**, engineer & technical consultant.
+
+Need something like this designed or built? [Inoltro](https://inoltro.ai) is my studio.
