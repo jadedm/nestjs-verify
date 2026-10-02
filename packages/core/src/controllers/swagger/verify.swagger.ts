@@ -6,7 +6,7 @@ export const VerifySwagger = {
     operation: ApiOperation({
       summary: 'Start a verification',
       description:
-        'Generates a one-time code, stores a salted hash, and dispatches the code through the configured SMS provider. Returns an sid that the caller can keep or discard; subsequent /verify/check calls only need the phone number.',
+        'Generates a one-time code, stores a salted hash, and sends the code through the provider for the channel (SMS by default, or email). Returns an sid that the caller can keep or discard; subsequent /verify/check calls only need the phone number or email address.',
     }),
     body: ApiBody({ type: StartVerificationDto }),
     ok: ApiResponse({
@@ -44,11 +44,12 @@ export const VerifySwagger = {
     }),
     invalid: ApiResponse({
       status: 400,
-      description: 'Validation error. See `code` for the specific failure.',
+      description:
+        'Validation error. See `code`: INVALID_PHONE, INVALID_EMAIL, or CHANNEL_NOT_SUPPORTED when the channel has no configured provider.',
     }),
     smsFailed: ApiResponse({
       status: 503,
-      description: 'All configured SMS providers failed to dispatch the code.',
+      description: 'All configured providers for the channel failed to send the code.',
     }),
   },
 
@@ -77,7 +78,7 @@ export const VerifySwagger = {
     noVerification: ApiResponse({
       status: 400,
       description:
-        'No active verification was found for this phone number (none started, or already terminal).',
+        'No active verification was found for this phone number or email address (none started, or already terminal).',
     }),
     expired: ApiResponse({
       status: 400,

@@ -1,0 +1,57 @@
+{
+  "name": "@jadedm/nestjs-verify-ses",
+  "version": "0.5.0",
+  "description": "Amazon SES email provider adapter for @jadedm/nestjs-verify.",
+  "keywords": [
+    "nestjs",
+    "otp",
+    "verify",
+    "ses",
+    "email",
+    "aws"
+  ],
+  "license": "MIT",
+  "author": "jadedm <jadedmanish@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jadedm/nestjs-verify.git",
+    "directory": "packages/provider-ses"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@jadedm/nestjs-verify": "workspace:^",
+    "@aws-sdk/client-sesv2": "^3.500.0"
+  },
+  "devDependencies": {
+    "@jadedm/nestjs-verify": "workspace:*",
+    "@aws-sdk/client-sesv2": "^3.500.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist"
+  }
+}

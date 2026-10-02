@@ -26,12 +26,16 @@ export const VerifyErrorCode = {
   IpRateLimited: 'IP_RATE_LIMITED',
   /** IP is touching too many distinct phones (velocity heuristic). HTTP 429. */
   AbuseVelocity: 'ABUSE_VELOCITY',
-  /** All configured SMS providers failed. HTTP 503. */
+  /** All configured providers for the channel failed (SMS or email). HTTP 503. */
   SmsDispatchFailed: 'SMS_DISPATCH_FAILED',
   /** No active verification for this phone (on check). HTTP 400. */
   NoPendingVerification: 'NO_PENDING_VERIFICATION',
   /** Verification expired before check. HTTP 400. */
   CodeExpired: 'CODE_EXPIRED',
+  /** Email address is malformed or longer than 254 characters. HTTP 400. */
+  InvalidEmail: 'INVALID_EMAIL',
+  /** The requested channel has no configured provider. HTTP 400. */
+  ChannelNotSupported: 'CHANNEL_NOT_SUPPORTED',
 } as const;
 
 export type VerifyErrorCode =
@@ -140,6 +144,26 @@ export class CodeExpiredException extends VerifyException {
     super(
       VerifyErrorCode.CodeExpired,
       'The code has expired. Request a new one.',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
+export class InvalidEmailException extends VerifyException {
+  constructor() {
+    super(
+      VerifyErrorCode.InvalidEmail,
+      'Email must be a valid address of at most 254 characters.',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
+export class ChannelNotSupportedException extends VerifyException {
+  constructor(channel: string) {
+    super(
+      VerifyErrorCode.ChannelNotSupported,
+      `Channel "${channel}" has no configured provider.`,
       HttpStatus.BAD_REQUEST,
     );
   }

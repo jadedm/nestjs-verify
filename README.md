@@ -1,6 +1,6 @@
 # nestjs-verify
 
-Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS provider and the stores.
+Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS or email provider and the stores.
 
 ## Migrating from 0.2.x to 0.3.0
 
@@ -50,9 +50,10 @@ pnpm add @jadedm/nestjs-verify-postgres     # or -mongo, or -redis for ephemeral
 
 | Package | Purpose |
 |---|---|
-| [`@jadedm/nestjs-verify`](./packages/core) | Core module, service, five store interfaces, in-memory stores, mock SMS provider |
+| [`@jadedm/nestjs-verify`](./packages/core) | Core module, service, five store interfaces, in-memory stores, mock SMS and email providers |
 | [`@jadedm/nestjs-verify-twilio`](./packages/provider-twilio) | Twilio SMS provider adapter with transient-error retry |
 | [`@jadedm/nestjs-verify-gupshup`](./packages/provider-gupshup) | Gupshup SMS provider adapter (India and SEA market) |
+| [`@jadedm/nestjs-verify-ses`](./packages/provider-ses) | Amazon SES email provider adapter |
 | [`@jadedm/nestjs-verify-postgres`](./packages/store-postgres) | All five stores against Postgres. Atomic ops, migration runner with advisory lock |
 | [`@jadedm/nestjs-verify-mongo`](./packages/store-mongo) | All five stores against Mongo. Atomic ops via aggregation pipelines, TTL indexes |
 | [`@jadedm/nestjs-verify-redis`](./packages/store-redis) | Three ephemeral stores against Redis. Atomic INCR via Lua. Pair with a durable store. |
@@ -95,6 +96,30 @@ curl -X POST http://localhost:3000/verify/check \
 
 For production, swap `MockSmsProvider` for `TwilioSmsProvider` and `createMemoryStores()` for `await createPostgresStores({ connectionString })` (or `createMongoStores`, or a mix with `createRedisStores` for the ephemeral half).
 
+## Email codes
+
+Configure `email` alongside or instead of `sms`, then start with `channel: 'email'`:
+
+```ts
+import { SesEmailProvider } from '@jadedm/nestjs-verify-ses';
+
+VerifyModule.forRoot({
+  email: {
+    provider: new SesEmailProvider({ from: 'no-reply@example.com', region: 'ap-south-1' }),
+    subject: 'Your sign-in code',
+  },
+  stores: createMemoryStores(),
+});
+```
+
+```bash
+curl -X POST http://localhost:3000/verify/start \
+  -H 'Content-Type: application/json' \
+  -d '{"to":"admin@example.com","channel":"email"}'
+```
+
+`check` takes the address in `to` as for a phone. The whole address is lowercased for cooldowns, rate limits and lookup, so case variants of one mailbox share them; the code is sent to the address as given. The IP velocity check counts addresses as it counts phones. Provider errors have the address replaced with `[recipient]` before they are logged. Plus-addressing and provider-specific dot rules (`a+1@gmail.com`, `a.b@gmail.com`) are not folded, so each is its own key; the per-IP limits still apply. A failed email send returns `SMS_DISPATCH_FAILED`, the same code as a failed SMS. Store fields named `phone` hold the address. `MockEmailProvider` logs instead of sending, for development and tests.
+
 ## State machine
 
 ```mermaid
@@ -119,9 +144,9 @@ A verification is created in `pending`. It transitions exactly once, to `approve
 | Code storage | Twilio's tenant | Your database, salted SHA-256 |
 | Attempt cap, cooldown, rate limits | Built in | Built in |
 | Fraud Guard | Built in | Basic velocity check, pluggable |
-| Channel fallback | SMS, voice, email, WhatsApp | SMS today; channels listed in `VerificationChannel`, only SMS dispatched |
-| Pricing at scale | ~$0.05 per verification on top of SMS | Cost of your SMS provider only |
-| Provider lock-in | Twilio | Choose: Twilio today, more later |
+| Channels | SMS, voice, email, WhatsApp | SMS and email; voice and WhatsApp are rejected with `CHANNEL_NOT_SUPPORTED` |
+| Pricing at scale | ~$0.05 per verification on top of SMS | Cost of your SMS or email provider only |
+| Provider lock-in | Twilio | Choose: Twilio or Gupshup for SMS, SES for email, or your own |
 | Data residency | Twilio's regions | Wherever your DB runs |
 | DLR / delivery feedback | Built in | Not yet (see [Maturity](./packages/core/README.md#maturity-and-limitations)) |
 | SOC 2 evidence | Inherited from Twilio | Your responsibility |

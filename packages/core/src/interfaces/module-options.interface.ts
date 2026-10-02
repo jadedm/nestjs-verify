@@ -1,5 +1,6 @@
 import { ModuleMetadata, Type } from '@nestjs/common';
 import { SmsProvider } from './sms-provider.interface.js';
+import { EmailProvider } from './email-provider.interface.js';
 import { VerifyStore } from './verify-store.interface.js';
 import { AbuseStore } from './abuse-store.interface.js';
 import { RateLimitStore } from './rate-limit-store.interface.js';
@@ -13,10 +14,24 @@ export interface RateLimitPolicy {
 }
 
 export interface VerifyModuleOptions {
-  sms: {
+  /** SMS delivery. At least one of `sms` or `email` is required. */
+  sms?: {
     provider: SmsProvider;
     /** Optional fallback chain. Tried in order if primary fails. */
     fallbacks?: SmsProvider[];
+  };
+  /**
+   * Email delivery, used when a verification starts with `channel: 'email'`.
+   * Store fields named `phone` then hold the email address.
+   */
+  email?: {
+    provider: EmailProvider;
+    /** Optional fallback chain. Tried in order if primary fails. */
+    fallbacks?: EmailProvider[];
+    /** Subject line. {{code}} is replaced. Default 'Your verification code'. */
+    subject?: string;
+    /** Plain-text body. {{code}} is replaced. Defaults to `messageTemplate`. */
+    template?: string;
   };
   stores: {
     verify: VerifyStore;
@@ -85,7 +100,7 @@ export interface VerifyModuleOptions {
   };
   /** Mount the built-in /verify controller. Default true. */
   registerController?: boolean;
-  /** Body template. {{code}} is replaced. */
+  /** SMS body template. {{code}} is replaced. Also the email body when `email.template` is unset. */
   messageTemplate?: string;
   logging?: {
     /**

@@ -15,6 +15,9 @@ export * from './store/memory-phone-index.store.js';
 export * from './store/create-memory-stores.js';
 
 export * from './providers/mock-sms.provider.js';
+export * from './providers/mock-email.provider.js';
+export { redact as redactRecipient } from './recipient.js';
+export type { DeliveryKind, Recipient } from './recipient.js';
 
 export * from './audit/memory-audit.sink.js';
 export * from './audit/stdout-audit.sink.js';

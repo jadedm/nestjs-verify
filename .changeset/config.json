@@ -7,11 +7,14 @@
     [
       "@jadedm/nestjs-verify",
       "@jadedm/nestjs-verify-twilio",
-      "@jadedm/nestjs-verify-postgres"
+      "@jadedm/nestjs-verify-postgres",
+      "@jadedm/nestjs-verify-ses"
     ]
   ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["basic-twilio-postgres"]
+  "ignore": [
+    "basic-twilio-postgres"
+  ]
 }

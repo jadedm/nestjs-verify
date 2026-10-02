@@ -31,7 +31,7 @@ The PR target branch is always `main`. Force-pushes and deletions on `main` are 
 
 ## Changesets
 
-This repo uses [Changesets](https://github.com/changesets/changesets) for versioning. The four published packages are kept in lockstep via a `linked` group, so a bump on one moves them all.
+This repo uses [Changesets](https://github.com/changesets/changesets) for versioning. The packages listed in the `linked` group in `.changeset/config.json` share version numbers: a package with a changeset is bumped to the highest version in the group. A package with no changeset is not bumped.
 
 If your change is user-facing (it changes runtime behavior, the public API, the published types, dependencies, or documented behavior), add a changeset:
 
@@ -74,7 +74,7 @@ Releases are driven by Changesets. Once you have a Trusted Publisher configured 
 4. Review and merge the "Version Packages" PR.
 5. The release workflow publishes to npm using GitHub's OIDC token. No NPM_TOKEN is needed.
 
-If Trusted Publishing is not yet configured, the maintainer publishes manually with `npm publish --otp=...` per package, four times.
+If Trusted Publishing is not yet configured, the maintainer publishes manually with `npm publish --otp=...` once per published package.
 
 ## Reporting bugs and proposing features
 
