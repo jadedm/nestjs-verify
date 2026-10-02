@@ -11,7 +11,10 @@ export interface AuditEvent {
   type: AuditEventType;
   /** Verification sid, when one exists. */
   sid?: string;
-  /** Phone with the middle redacted (e.g. +919***10). Never raw phone. */
+  /**
+   * Recipient with most of it redacted: a phone as +919***10, an email as
+   * a***@example.com (first character and domain kept). Never the raw value.
+   */
   phoneRedacted: string;
   /** Client IP, when available. */
   ip?: string;

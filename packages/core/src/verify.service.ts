@@ -13,7 +13,6 @@ import {
   AbuseVelocityException,
   CodeExpiredException,
   CooldownActiveException,
-  InvalidPhoneException,
   IpRateLimitedException,
   NoPendingVerificationException,
   PhoneRateLimitedException,
@@ -30,6 +29,14 @@ import {
   generateSid,
   hashCode,
 } from './code/code-gen.js';
+import { buildDeliverers, Deliverer } from './dispatch.js';
+import {
+  DeliveryKind,
+  Recipient,
+  recipientFor,
+  recipientFromAddress,
+  redact,
+} from './recipient.js';
 
 export interface StartParams {
   to: string;
@@ -69,18 +76,19 @@ const DEFAULTS = {
   perIp: { count: 20, windowSeconds: 3600 },
   maxDistinctPhonesPerIp: 10,
   velocityWindowSeconds: 300,
-  messageTemplate: 'Your verification code is {{code}}. It expires in 10 minutes.',
 } as const;
 
 @Injectable()
 export class VerifyService {
   private readonly log = new Logger(VerifyService.name);
   private readonly metrics: MetricsRecorder;
+  private readonly deliverers: Map<DeliveryKind, Deliverer[]>;
 
   constructor(
     @Inject(VERIFY_MODULE_OPTIONS)
     private readonly options: VerifyModuleOptions,
   ) {
+    this.deliverers = buildDeliverers(options);
     this.metrics = createMetricsRecorder({
       enabled: options.observability?.metrics?.enabled,
       registry: options.observability?.metrics?.registry,
@@ -133,8 +141,13 @@ export class VerifyService {
     params: StartParams,
     span: import('@opentelemetry/api').Span,
   ): Promise<StartResult> {
-    const phone = this.normalizePhone(params.to);
     const channel = params.channel ?? 'sms';
+    const recipient = recipientFor(
+      params.to,
+      channel,
+      new Set(this.deliverers.keys()),
+    );
+    const phone = recipient.key;
     span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(phone));
     this.vlog(`start: phone=${this.redact(phone)} channel=${channel} ip=${params.ip ?? '-'}`);
 
@@ -153,8 +166,8 @@ export class VerifyService {
       throw new CooldownActiveException(cooldownMs);
     }
 
-    await this.enforceRateLimits(phone, params.ip);
-    await this.enforceAbuseHeuristics(phone, params.ip);
+    await this.enforceRateLimits(phone, params.ip, channel);
+    await this.enforceAbuseHeuristics(phone, params.ip, channel);
 
     const codeLength = this.options.code?.length ?? DEFAULTS.codeLength;
     const ttlSeconds = this.options.code?.ttlSeconds ?? DEFAULTS.ttlSeconds;
@@ -192,28 +205,26 @@ export class VerifyService {
       ip: params.ip,
       channel,
     });
-    try {
-      await this.sendCode(phone, code);
-      this.vlog(`start: dispatched sid=${sid} via ${this.options.sms.provider.name}; cooldown=${cooldownSeconds}s`);
-      await this.options.stores.cooldown.start(phone, cooldownSeconds);
-      await this.options.stores.abuse?.recordSendAttempt({
-        sid,
-        phone,
-        ip: params.ip,
-        channel,
-        provider: this.options.sms.provider.name,
-        success: true,
-      });
-      this.metrics.startsTotal();
-      await this.audit({
-        type: 'code_dispatched',
-        sid,
-        phoneRedacted: this.redact(phone),
-        ip: params.ip,
-        channel,
-        provider: this.options.sms.provider.name,
-      });
-    } catch (err) {
+    // The send and the bookkeeping that must follow it fail together: if the
+    // cooldown or the send record cannot be written, the verification is
+    // removed and the caller gets 503. The code may
+    // already have been delivered, so a retry can send a second one; only the
+    // per-recipient rate limit counts it.
+    const [provider, sendErr] = await asyncHandler(
+      this.sendCode(recipient, code).then(async (sentBy) => {
+        await this.options.stores.cooldown.start(phone, cooldownSeconds);
+        await this.options.stores.abuse?.recordSendAttempt({
+          sid,
+          phone,
+          ip: params.ip,
+          channel,
+          provider: sentBy,
+          success: true,
+        });
+        return sentBy;
+      }),
+    );
+    if (sendErr) {
       await this.options.stores.verify.delete(sid);
       await this.options.stores.phoneIndex.delete(phone);
       await this.options.stores.abuse?.recordSendAttempt({
@@ -221,12 +232,22 @@ export class VerifyService {
         phone,
         ip: params.ip,
         channel,
-        provider: this.options.sms.provider.name,
+        provider: this.chainName(recipient.kind),
         success: false,
-        errorCode: (err as Error).message,
+        errorCode: sendErr.message,
       });
       throw new SmsDispatchFailedException();
     }
+    this.vlog(`start: dispatched sid=${sid} via ${provider}; cooldown=${cooldownSeconds}s`);
+    this.metrics.startsTotal();
+    await this.audit({
+      type: 'code_dispatched',
+      sid,
+      phoneRedacted: this.redact(phone),
+      ip: params.ip,
+      channel,
+      provider,
+    });
 
     return {
       sid,
@@ -250,7 +271,7 @@ export class VerifyService {
     span: import('@opentelemetry/api').Span,
   ): Promise<CheckResult> {
     const checkStart = Date.now();
-    const phone = this.normalizePhone(params.to);
+    const phone = recipientFromAddress(params.to).key;
     span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(phone));
     this.vlog(`check: phone=${this.redact(phone)} ip=${params.ip ?? '-'}`);
     const sid = await this.options.stores.phoneIndex.get(phone);
@@ -347,52 +368,54 @@ export class VerifyService {
     return { sid, state: 'pending', attemptsRemaining };
   }
 
-  private async sendCode(phone: string, code: string): Promise<void> {
-    const template =
-      this.options.messageTemplate ?? DEFAULTS.messageTemplate;
-    const body = template.replace('{{code}}', code);
-    const providers = [
-      this.options.sms.provider,
-      ...(this.options.sms.fallbacks ?? []),
-    ];
+  /** Tries each provider for the recipient's kind in order; returns the one that sent. */
+  private async sendCode(recipient: Recipient, code: string): Promise<string> {
     const serviceName = this.options.observability?.tracing?.serviceName;
     let lastError: unknown;
-    for (const provider of providers) {
+    for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
       const sendStart = Date.now();
       const [, err] = await asyncHandler(
         withSpan(
           TELEMETRY.SPAN_VERIFY_SEND_CODE,
           {
             attributes: {
-              [TELEMETRY.ATTR_PROVIDER]: provider.name,
-              [TELEMETRY.ATTR_PHONE_REDACTED]: this.redact(phone),
-              [TELEMETRY.ATTR_CHANNEL]: 'sms',
+              [TELEMETRY.ATTR_PROVIDER]: deliverer.name,
+              [TELEMETRY.ATTR_PHONE_REDACTED]: this.redact(recipient.key),
+              [TELEMETRY.ATTR_CHANNEL]: recipient.kind,
             },
           },
-          () => provider.send({ to: phone, body }),
+          () => deliverer.deliver(recipient.address, code),
           serviceName,
         ),
       );
       const seconds = (Date.now() - sendStart) / 1000;
-      this.metrics.smsSendDuration(
-        provider.name,
-        err ? SMS_OUTCOME.Failure : SMS_OUTCOME.Success,
-        seconds,
-      );
-      if (!err) return;
+      // The histogram is SMS-only until it gains a channel label (#7).
+      if (recipient.kind === 'sms') {
+        this.metrics.smsSendDuration(
+          deliverer.name,
+          err ? SMS_OUTCOME.Failure : SMS_OUTCOME.Success,
+          seconds,
+        );
+      }
+      if (!err) return deliverer.name;
       lastError = err;
       this.log.warn(
-        `provider ${provider.name} failed for ${this.redact(phone)}: ${
+        `provider ${deliverer.name} failed for ${this.redact(recipient.key)}: ${
           (err as Error).message
         }`,
       );
     }
-    throw lastError ?? new Error('All SMS providers failed');
+    throw lastError ?? new Error(`All ${recipient.kind} providers failed`);
+  }
+
+  private chainName(kind: DeliveryKind): string {
+    return (this.deliverers.get(kind) ?? []).map((d) => d.name).join(',');
   }
 
   private async enforceRateLimits(
     phone: string,
     ip: string | undefined,
+    channel: VerificationChannel,
   ): Promise<void> {
     const perPhone =
       this.options.rateLimit?.perPhone ?? DEFAULTS.perPhone;
@@ -408,7 +431,7 @@ export class VerifyService {
         type: 'rate_limited',
         phoneRedacted: this.redact(phone),
         ip,
-        channel: 'sms',
+        channel,
         outcome: 'phone_rate_limit',
         meta: { resetAt: phoneHit.resetAt },
       });
@@ -427,7 +450,7 @@ export class VerifyService {
           type: 'rate_limited',
           phoneRedacted: this.redact(phone),
           ip,
-          channel: 'sms',
+          channel,
           outcome: 'ip_rate_limit',
           meta: { resetAt: ipHit.resetAt },
         });
@@ -439,6 +462,7 @@ export class VerifyService {
   private async enforceAbuseHeuristics(
     phone: string,
     ip: string | undefined,
+    channel: VerificationChannel,
   ): Promise<void> {
     if (!ip || !this.options.stores.abuse) return;
     const maxDistinct =
@@ -457,7 +481,7 @@ export class VerifyService {
         type: 'abuse_detected',
         phoneRedacted: this.redact(phone),
         ip,
-        channel: 'sms',
+        channel,
         outcome: 'velocity',
         meta: { distinctPhones: distinct },
       });
@@ -465,16 +489,8 @@ export class VerifyService {
     }
   }
 
-  private normalizePhone(input: string): string {
-    const trimmed = input.trim().replace(/\s+/g, '');
-    if (!/^\+\d{6,15}$/.test(trimmed)) {
-      throw new InvalidPhoneException();
-    }
-    return trimmed;
-  }
-
-  private redact(phone: string): string {
-    return phone.slice(0, 4) + '***' + phone.slice(-2);
+  private redact(key: string): string {
+    return redact(key);
   }
 
   /**

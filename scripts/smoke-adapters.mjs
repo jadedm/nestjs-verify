@@ -15,7 +15,9 @@
  *   node scripts/smoke-adapters.mjs
  *   docker compose -f scripts/docker-compose.smoke.yml down -v
  */
+import 'reflect-metadata';
 import Redis from 'ioredis';
+import { MemoryVerifyStore, MockEmailProvider, VerifyService } from '@jadedm/nestjs-verify';
 import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
 import { createMongoStores } from '@jadedm/nestjs-verify-mongo';
 import { createRedisStores } from '@jadedm/nestjs-verify-redis';
@@ -148,6 +150,31 @@ async function exerciseAuditSink(name, audit) {
   console.log('  ok: recorded 2 events without error');
 }
 
+// A whole email verification through VerifyService on the given stores: the
+// address is the store key, so every adapter must hold it as it holds a phone.
+async function exerciseEmailFlow(name, stores) {
+  console.log(`\n--- ${name} email verification through VerifyService ---`);
+  const sent = [];
+  const service = new VerifyService({
+    email: { provider: new MockEmailProvider({ logToConsole: false, onSend: (p) => sent.push(p) }) },
+    stores,
+    code: { fixedCode: '424242' },
+    attempts: { max: 2 },
+  });
+  const tag = name.toLowerCase();
+  const started = await service.start({ to: `Smoke.${tag}@Example.com`, channel: 'email', ip: '203.0.113.9' });
+  assert(started.channel === 'email' && sent.length === 1 && sent[0].text.includes('424242'), 'start by email sends the code');
+  const approved = await service.check({ to: `Smoke.${tag}@example.COM`, code: '424242' });
+  assert(approved.state === 'approved', 'check approves the code; domain case folded');
+
+  const locked = `lock.${tag}@example.com`;
+  await service.start({ to: locked, channel: 'email' });
+  await service.check({ to: locked, code: '000000' });
+  assert((await service.check({ to: locked, code: '000000' })).state === 'canceled', 'wrong codes lock out');
+  const again = await service.start({ to: locked, channel: 'email' }).catch((e) => e);
+  assert(again?.code === 'COOLDOWN_ACTIVE', 'cooldown applies to the address');
+}
+
 async function main() {
   // ---- Postgres: all 5 stores ----
   console.log('=== Postgres ===');
@@ -158,6 +185,7 @@ async function main() {
   await exerciseCooldownStore('Postgres', pg.cooldown);
   await exercisePhoneIndexStore('Postgres', pg.phoneIndex);
   await exerciseAuditSink('Postgres', pg.audit);
+  await exerciseEmailFlow('Postgres', pg);
   await pg.pool.end();
 
   // ---- Mongo: all 5 stores ----
@@ -169,6 +197,7 @@ async function main() {
   await exerciseCooldownStore('Mongo', mg.cooldown);
   await exercisePhoneIndexStore('Mongo', mg.phoneIndex);
   await exerciseAuditSink('Mongo', mg.audit);
+  await exerciseEmailFlow('Mongo', mg);
   await mg.close?.();
 
   // ---- Redis: 3 ephemeral stores ----
@@ -179,6 +208,7 @@ async function main() {
   await exerciseRateLimitStore('Redis', r.rateLimit);
   await exerciseCooldownStore('Redis', r.cooldown);
   await exercisePhoneIndexStore('Redis', r.phoneIndex);
+  await exerciseEmailFlow('Redis', { ...r, verify: new MemoryVerifyStore() });
   await client.quit();
 
   console.log('\nALL ADAPTER CONTRACTS VERIFIED');

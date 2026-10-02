@@ -1,6 +1,6 @@
 # @jadedm/nestjs-verify
 
-Self-hosted Twilio-Verify-style OTP for NestJS. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You bring the SMS provider and the stores.
+Self-hosted Twilio-Verify-style OTP for NestJS. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You bring the SMS or email provider and the stores.
 
 ```bash
 pnpm add @jadedm/nestjs-verify
@@ -104,16 +104,21 @@ You can use a single backend for all five, or split durable vs ephemeral (Postgr
 
 No `@nestjs/cache-manager` peer dep. State is managed through the store interfaces.
 
+## Email codes
+
+Configure `email` (alongside `sms`, or on its own; at least one is required) and start with `channel: 'email'` and an address in `to`. `check` takes the address as it takes a phone. The whole address is lowercased for cooldowns, rate limits and lookup, so case variants of one mailbox share them; plus-addressing and Gmail dot variants are not folded. The code is sent to the address as given. A failed email send returns `SMS_DISPATCH_FAILED`. `MockEmailProvider` logs instead of sending. `voice` and `whatsapp` are rejected with `CHANNEL_NOT_SUPPORTED`.
+
 ## Provider and store adapters
 
 | Concern | Package |
 |---|---|
 | Twilio SMS | [`@jadedm/nestjs-verify-twilio`](https://www.npmjs.com/package/@jadedm/nestjs-verify-twilio) |
+| Amazon SES email | [`@jadedm/nestjs-verify-ses`](https://www.npmjs.com/package/@jadedm/nestjs-verify-ses) |
 | Postgres (all 5 stores) | [`@jadedm/nestjs-verify-postgres`](https://www.npmjs.com/package/@jadedm/nestjs-verify-postgres) |
 | Mongo (all 5 stores) | [`@jadedm/nestjs-verify-mongo`](https://www.npmjs.com/package/@jadedm/nestjs-verify-mongo) |
 | Redis (rate limit, cooldown, phone index) | [`@jadedm/nestjs-verify-redis`](https://www.npmjs.com/package/@jadedm/nestjs-verify-redis) |
 
-Bring your own: implement `SmsProvider` for a new SMS vendor or `VerifyStore` / `AbuseStore` for a different database. The interfaces are tiny and re-exported from this package.
+Bring your own: implement `SmsProvider` or `EmailProvider` for a new vendor, or `VerifyStore` / `AbuseStore` for a different database. The interfaces are tiny and re-exported from this package.
 
 ## Why
 
