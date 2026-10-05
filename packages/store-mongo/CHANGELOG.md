@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify-mongo
 
+## 0.6.0
+
+### Minor Changes
+
+- Version aligned with `@jadedm/nestjs-verify` 0.6.0; the peer range on core is now ^0.6.0. No changes to this package. Stores hold an email address in fields named `phone` for email verifications; no schema change.
+
 ## 0.5.0
 
 ### Minor Changes
