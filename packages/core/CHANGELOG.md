@@ -4,6 +4,7 @@
 
 ### Minor Changes
 
+- **Security fix (GHSA-qm9j-mc5v-33p5):** `check()` answered `approved` for a verification that was already approved, without comparing the submitted code. A finished verification now answers `canceled`; only the call that approves reports `approved`. If removing the recipient index fails after an approval, the approving call still answers `approved` and the failure is logged. Upgrade from 0.5.0 and earlier.
 Email channel and an Amazon SES provider.
 
 - New `email` module option (`provider`, `fallbacks`, `subject`, `template`) and an `EmailProvider` interface, plus `MockEmailProvider` for development and tests. `sms` is now optional; at least one of `sms` or `email` must be configured.
