@@ -257,6 +257,13 @@ describe('VerifyService, email channel', () => {
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('canceled');
   });
 
+  it('still reports approved when the index cleanup fails, and nothing after it does', async () => {
+    await service.start({ to: 'a@example.com', channel: 'email' });
+    vi.spyOn(stores.phoneIndex, 'delete').mockRejectedValue(new Error('store down'));
+    expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
+    expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
+  });
+
   it('gives approved to exactly one of two simultaneous right-code checks', async () => {
     await service.start({ to: '+14155552671' });
     const both = await Promise.all([

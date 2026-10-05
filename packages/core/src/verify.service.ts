@@ -320,7 +320,11 @@ export class VerifyService {
         sid,
         'approved',
       );
-      await this.options.stores.phoneIndex.delete(phone);
+      // The approval is already committed. A failed index cleanup must not
+      // turn it into an error: later checks of this record answer canceled,
+      // so a stale index entry grants nothing.
+      const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.delete(phone));
+      if (indexErr) this.log.warn(`check: index cleanup failed for sid=${sid}: ${indexErr.message}`);
       this.metrics.checksTotal(
         transitioned ? CHECK_OUTCOME.Approved : CHECK_OUTCOME.LockedOut,
       );
