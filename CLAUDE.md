@@ -58,24 +58,29 @@ Core (`packages/core/src`):
   from whether `to` contains `@`. Store fields named `phone` hold email addresses too.
 - `dispatch.ts`: builds a provider chain per delivery kind (primary plus fallbacks, tried in order)
   and scrubs the recipient out of provider error messages before they reach logs, spans or the abuse
-  store. Voice and WhatsApp are part of `VerificationChannel` but have no sender and are refused with
-  `CHANNEL_NOT_SUPPORTED`.
+  store.
+- Voice and WhatsApp are part of `VerificationChannel` but have no sender. `recipientFor` in
+  `recipient.ts` refuses them with `CHANNEL_NOT_SUPPORTED` before any state is touched.
 - `errors.ts`: request errors the service raises on purpose are `VerifyException`s (an
-  `HttpException`) carrying a stable `VerifyErrorCode` string. Store errors pass through unwrapped,
-  and `generateCode` throws a plain `Error` for a length outside 4 to 10. Clients branch on these codes, so they are wire contract. A failed email
-  send also returns `SMS_DISPATCH_FAILED`.
-- Wire responses use `state` (pending, approved, canceled, expired), not `status`, so they do not
-  collide with JSend-style envelopes.
+  `HttpException`) carrying a stable `VerifyErrorCode` string. Clients branch on these codes, so they
+  are wire contract. A failed send, SMS or email, returns `SMS_DISPATCH_FAILED`, and so does a store
+  failure in the bookkeeping right after the send. Other store errors pass through unwrapped, and
+  `generateCode` throws a plain `Error` for a length outside 4 to 10.
+- Responses carry the verification's `state`, not `status`, so they do not collide with JSend-style
+  envelopes. `start` returns `pending`; `check` returns `approved`, `pending` or `canceled`. An
+  expired code is a 400 `CODE_EXPIRED`, and a record that already finished answers `canceled`.
 - Codes are stored as salted SHA-256 and compared in constant time (`code/code-gen.ts`).
-- Audit sink, OpenTelemetry tracing and prom-client metrics are optional. Audit sink failures are
+- The audit sink and prom-client metrics are optional. `@opentelemetry/api` is a required peer;
+  spans are emitted only when the host app registers an OpenTelemetry SDK. Audit sink failures are
   logged and never fail a verification.
 
 Five store interfaces in `packages/core/src/interfaces`: `VerifyStore`, `AbuseStore` (optional),
 `RateLimitStore`, `CooldownStore`, `PhoneIndexStore`, plus an optional `AuditSink`. Core ships
 in-memory versions (`createMemoryStores()`). Each backend package exposes a `create*Stores` factory:
 
-- Postgres and Mongo implement all five plus an audit sink, and run versioned migrations on startup
-  (`migrations.ts`, `migration-runner.ts`). Postgres takes an advisory lock and records versions in
+- Postgres and Mongo implement all five plus an audit sink. Their `create*Stores` factory runs
+  versioned migrations (`migrations.ts`, `migration-runner.ts`); with `skipSchemaSetup: true` it only
+  checks the schema version. Postgres takes an advisory lock and records versions in
   `verify_schema_versions`. A schema change is a new migration entry, never an edit to an old one.
 - Redis implements only the three short-lived stores (rate limit, cooldown, phone index) and must be
   paired with a durable verify store.
