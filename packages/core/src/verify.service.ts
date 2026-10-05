@@ -289,12 +289,12 @@ export class VerifyService {
       throw new NoPendingVerificationException();
     }
 
+    // Only the call that moves a record from pending to approved reports
+    // approved. A record that is already approved, expired or canceled is
+    // finished: reporting approved here, without comparing the code, would
+    // let any code through while the recipient index still points at it.
     if (record.status !== 'pending') {
-      return {
-        sid,
-        state: record.status === 'approved' ? 'approved' : 'canceled',
-        attemptsRemaining: 0,
-      };
+      return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
     if (record.expiresAt.getTime() <= Date.now()) {
@@ -320,7 +320,11 @@ export class VerifyService {
         sid,
         'approved',
       );
-      await this.options.stores.phoneIndex.delete(phone);
+      // The approval is already committed. A failed index cleanup must not
+      // turn it into an error: later checks of this record answer canceled,
+      // so a stale index entry grants nothing.
+      const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.delete(phone));
+      if (indexErr) this.log.warn(`check: index cleanup failed for sid=${sid}: ${indexErr.message}`);
       this.metrics.checksTotal(
         transitioned ? CHECK_OUTCOME.Approved : CHECK_OUTCOME.LockedOut,
       );
