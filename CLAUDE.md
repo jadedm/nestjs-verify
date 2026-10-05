@@ -37,16 +37,16 @@ There is no linter in this repo.
 Adapter packages run `vitest --passWithNoTests`, so a package with no tests reports green. Store
 adapters (Postgres, Mongo, Redis) are covered only by `pnpm test:adapters`, not by `pnpm test`. Run it
 for any change to a store adapter or a store interface. `SMOKE_PG_URL`, `SMOKE_MG_URL`, `SMOKE_MG_DB`,
-`SMOKE_REDIS_HOST` and `SMOKE_REDIS_PORT` point it at existing databases instead (see
-`scripts/README.md`).
+`SMOKE_REDIS_HOST` and `SMOKE_REDIS_PORT` point it at existing databases instead (read at the top of
+`scripts/smoke-adapters.mjs`; `scripts/README.md` lists only the Postgres and Mongo ones).
 
 ## Architecture
 
 Core (`packages/core/src`):
 
 - `verify.module.ts`: `VerifyModule.forRoot` / `forRootAsync` bind the options under
-  `VERIFY_MODULE_OPTIONS`, provide `VerifyService`, and mount `VerifyController` unless
-  `registerController: false`.
+  `VERIFY_MODULE_OPTIONS` and provide `VerifyService`. `forRoot` mounts `VerifyController` unless
+  `registerController: false`; `forRootAsync` always mounts it and ignores that option (#18).
 - `verify.service.ts`: all flow logic. `start`: resolve recipient, cooldown, per-phone then per-IP
   rate limit, IP velocity check, create record and phone index, send, then start cooldown and record
   the send. If the send or that follow-up bookkeeping fails, the record and index are deleted and
@@ -60,8 +60,9 @@ Core (`packages/core/src`):
   and scrubs the recipient out of provider error messages before they reach logs, spans or the abuse
   store. Voice and WhatsApp are part of `VerificationChannel` but have no sender and are refused with
   `CHANNEL_NOT_SUPPORTED`.
-- `errors.ts`: every error is a `VerifyException` (an `HttpException`) carrying a stable
-  `VerifyErrorCode` string. Clients branch on these codes, so they are wire contract. A failed email
+- `errors.ts`: request errors the service raises on purpose are `VerifyException`s (an
+  `HttpException`) carrying a stable `VerifyErrorCode` string. Store errors pass through unwrapped,
+  and `generateCode` throws a plain `Error` for a length outside 4 to 10. Clients branch on these codes, so they are wire contract. A failed email
   send also returns `SMS_DISPATCH_FAILED`.
 - Wire responses use `state` (pending, approved, canceled, expired), not `status`, so they do not
   collide with JSend-style envelopes.
@@ -90,8 +91,9 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
 - `markStatus` only transitions out of `pending` and returns false if the record was no longer pending.
 - `scripts/smoke-adapters.mjs` encodes these invariants; a new adapter or store method gets cases
   there.
-- Adapters import only types from `@jadedm/nestjs-verify` and never reach into core internals. Core is
-  a `workspace:^` peer dependency of each adapter.
+- Adapters import from the `@jadedm/nestjs-verify` entry point only, never core internals, and almost
+  only types. The exception is `provider-gupshup`, which imports `asyncHandler` as a value. Core is a
+  `workspace:^` peer dependency of each adapter.
 
 ## Build rules
 
@@ -110,12 +112,18 @@ breaking.
 The intended path is `.github/workflows/release.yml`: on push to `main`, `changesets/action` either
 opens a "Version Packages" PR or, with no pending changesets, publishes any package whose local
 version is not on npm, through npm Trusted Publishing (OIDC). As of 0.6.0 that path has never
-succeeded: every release run with something to publish failed with `E404 Not Found - PUT`, the error
-npm gives when the OIDC token is not accepted, most likely because no trusted publisher is
-configured on npmjs.com for these packages (not checked; that is console work). Every
-version on npm (0.1.0 to 0.5.0) was published by hand from the maintainer's account with
-`scripts/publish-manual.sh --otp <code>`. Releases so far have also been cut as `release/x.y.z`
-branches with hand-bumped versions, not through a "Version Packages" PR.
+succeeded: every release run with something to publish failed with `E404 Not Found - PUT`, npm's
+answer to an unauthenticated publish. The workflow runs Node 22, whose bundled npm 10 cannot do
+trusted publishing (it needs 11.5.1 or later), and trusted publishers are probably not configured
+on npmjs.com either (#19). Every version on npm (0.1.0 to 0.5.0) was published by hand from the
+maintainer's account.
+
+Until #19 is done, publish with `scripts/publish-manual.sh`, run by the owner in their own terminal
+after `npm login`. npm asks for 2FA as a browser approval, so `--otp` is optional. From a shell with
+no terminal attached (an agent's shell) the publish fails with `EOTP`, so hand the command over.
+
+Releases so far have been cut as `release/x.y.z` branches with hand-bumped versions, not through a
+"Version Packages" PR. A core `minor` changeset would currently version every package 1.0.0 (#10).
 
 `packages/provider-ses` is `"private": true` and is never published, though the README lists it.
 
