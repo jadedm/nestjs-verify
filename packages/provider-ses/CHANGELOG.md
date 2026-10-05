@@ -4,4 +4,4 @@
 
 ### Minor Changes
 
-- First version: `SesEmailProvider` sends verification codes through Amazon SES v2. Needs Node 20 or newer. Not yet published to npm.
+- First version: `SesEmailProvider` sends verification codes through Amazon SES v2. Needs Node 20 or newer.

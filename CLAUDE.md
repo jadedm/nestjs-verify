@@ -131,8 +131,6 @@ no terminal attached (an agent's shell) the publish fails with `EOTP`, so hand t
 Releases so far have been cut as `release/x.y.z` branches with hand-bumped versions, not through a
 "Version Packages" PR. A core `minor` changeset would currently version every package 1.0.0 (#10).
 
-`packages/provider-ses` is `"private": true` and is never published, though the README lists it.
-
 The `linked` group in `.changeset/config.json` lists only core, twilio, postgres and ses. Gupshup,
 mongo and redis are outside it even though the README says all packages version in lockstep.
 
