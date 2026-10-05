@@ -64,8 +64,9 @@ Core (`packages/core/src`):
 - `errors.ts`: request errors the service raises on purpose are `VerifyException`s (an
   `HttpException`) carrying a stable `VerifyErrorCode` string. Clients branch on these codes, so they
   are wire contract. A failed send, SMS or email, returns `SMS_DISPATCH_FAILED`, and so does a store
-  failure in the bookkeeping right after the send. Other store errors pass through unwrapped, and
-  `generateCode` throws a plain `Error` for a length outside 4 to 10.
+  failure in the bookkeeping right after the send. A failed index cleanup after an approval is only
+  logged. Other store errors pass through unwrapped, and `generateCode` throws a plain `Error` for a
+  length outside 4 to 10.
 - Responses carry the verification's `state`, not `status`, so they do not collide with JSend-style
   envelopes. `start` returns `pending`; `check` returns `approved`, `pending` or `canceled`. An
   expired code is a 400 `CODE_EXPIRED`, and a record that already finished answers `canceled`.
