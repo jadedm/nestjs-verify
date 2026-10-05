@@ -248,6 +248,31 @@ describe('VerifyService, email channel', () => {
     expect((await service.start({ to: 'a@example.com', channel: 'email' })).channel).toBe('email');
   });
 
+  it('reports approved only to the check that approved, never to a later check with any code', async () => {
+    await service.start({ to: 'a@example.com', channel: 'email' });
+    // Keep the index pointing at the approved record, as a failed delete would.
+    vi.spyOn(stores.phoneIndex, 'delete').mockResolvedValue(undefined);
+    expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
+    expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
+    expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('canceled');
+  });
+
+  it('still reports approved when the index cleanup fails, and nothing after it does', async () => {
+    await service.start({ to: 'a@example.com', channel: 'email' });
+    vi.spyOn(stores.phoneIndex, 'delete').mockRejectedValue(new Error('store down'));
+    expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
+    expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
+  });
+
+  it('gives approved to exactly one of two simultaneous right-code checks', async () => {
+    await service.start({ to: '+14155552671' });
+    const both = await Promise.all([
+      service.check({ to: '+14155552671', code: CODE }),
+      service.check({ to: '+14155552671', code: CODE }).catch(() => ({ state: 'no-pending' })),
+    ]);
+    expect(both.filter((r) => r.state === 'approved')).toHaveLength(1);
+  });
+
   it('never puts the full address in audit events (case 12)', async () => {
     await service.start({ to: 'secret.person@example.com', channel: 'email', ip: '10.0.0.1' });
     await service.check({ to: 'secret.person@example.com', code: CODE, ip: '10.0.0.1' });
