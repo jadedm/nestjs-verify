@@ -289,12 +289,12 @@ export class VerifyService {
       throw new NoPendingVerificationException();
     }
 
+    // Only the call that moves a record from pending to approved reports
+    // approved. A record that is already approved, expired or canceled is
+    // finished: reporting approved here, without comparing the code, would
+    // let any code through while the recipient index still points at it.
     if (record.status !== 'pending') {
-      return {
-        sid,
-        state: record.status === 'approved' ? 'approved' : 'canceled',
-        attemptsRemaining: 0,
-      };
+      return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
     if (record.expiresAt.getTime() <= Date.now()) {
