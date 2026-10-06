@@ -30,7 +30,9 @@ export class SesEmailProvider implements EmailProvider {
     this.client = opts.client ?? new SESv2Client({ region: opts.region });
   }
 
-  async send(params: EmailSendParams): Promise<EmailSendResult> {
+  // The options type is written out rather than imported, so these
+  // declarations still type-check against a core version that lacks it.
+  async send(params: EmailSendParams, options?: { signal?: AbortSignal }): Promise<EmailSendResult> {
     const result = await this.client.send(
       new SendEmailCommand({
         FromEmailAddress: this.opts.from,
@@ -43,6 +45,7 @@ export class SesEmailProvider implements EmailProvider {
         },
         ConfigurationSetName: this.opts.configurationSetName,
       }),
+      { abortSignal: options?.signal },
     );
     if (!result.MessageId) throw new Error('SES returned no MessageId');
     return { providerMessageId: result.MessageId, provider: this.name };

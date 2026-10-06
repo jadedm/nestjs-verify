@@ -9,7 +9,7 @@ pnpm add @jadedm/nestjs-verify-ses @aws-sdk/client-sesv2
 ## Usage
 
 ```ts
-import { VerifyModule } from '@jadedm/nestjs-verify';
+import { VerifyModule, createMemoryStores } from '@jadedm/nestjs-verify';
 import { SesEmailProvider } from '@jadedm/nestjs-verify-ses';
 
 VerifyModule.forRoot({
@@ -21,17 +21,17 @@ VerifyModule.forRoot({
     }),
     subject: 'Your Example sign-in code',
   },
-  stores: { /* ... */ },
+  stores: createMemoryStores(), // or a durable store adapter
 });
 ```
 
 Start a verification with `channel: 'email'` and an email address in `to`.
 
-Credentials come from the AWS SDK's default chain (environment, shared config, instance or task role). Pass `client` to use your own `SESv2Client`.
+Credentials and region come from the AWS SDK's default chain (environment, shared config, instance or task role). If no region is set anywhere, every send fails with "Region is missing" and the next provider is tried, so set `region` or `AWS_REGION`. Pass `client` to use your own `SESv2Client`.
 
 ## Errors and retries
 
-The AWS SDK retries throttling and server errors itself (three attempts by default). Anything it gives up on, and any rejection such as an unverified identity or a recipient outside the sandbox, is thrown, so `nestjs-verify` moves on to the next provider in `email.fallbacks`.
+The AWS SDK retries throttling and server errors itself (three attempts by default). Anything it gives up on, and any rejection such as an unverified identity or a recipient outside the sandbox, is thrown, so `nestjs-verify` moves on to the next provider in `email.fallbacks`. The SDK sets no request timeout of its own; the core's `delivery` limits stop waiting and abort the request. Logged errors keep the SES request id.
 
 ## Requirements
 
@@ -39,5 +39,5 @@ Node 20 or newer: current `@aws-sdk/client-sesv2` releases require it, though th
 
 ## Peers
 
-- `@jadedm/nestjs-verify` 0.x
+- `@jadedm/nestjs-verify` ^0.6.0 (the same minor version; the packages are released together)
 - `@aws-sdk/client-sesv2` 3.x
