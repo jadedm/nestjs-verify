@@ -84,3 +84,26 @@ describe('TwilioSmsProvider', () => {
     expect(seen[0]).not.toHaveProperty('from');
   });
 });
+
+describe('TwilioSmsProvider, abort (case 16)', () => {
+  it('stops retrying once the signal aborts, even mid-backoff', async () => {
+    const create = vi.fn(async () => {
+      throw Object.assign(new Error('service unavailable'), { status: 503 });
+    });
+    const p = patchMessages(makeProvider(5, 50), create);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error('core gave up')), 10);
+    const started = Date.now();
+    await expect(p.send({ to: '+14155552671', body: 'hi' }, { signal: controller.signal })).rejects.toThrow('core gave up');
+    expect(Date.now() - started).toBeLessThan(45);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start when the signal is already aborted', async () => {
+    const create = vi.fn(async () => ({ sid: 'SM1' }));
+    const p = patchMessages(makeProvider(), create);
+    await expect(p.send({ to: '+14155552671', body: 'hi' }, { signal: AbortSignal.abort(new Error('late')) })).rejects.toThrow('late');
+    expect(create).not.toHaveBeenCalled();
+  });
+});

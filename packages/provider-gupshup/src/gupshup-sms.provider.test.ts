@@ -169,3 +169,26 @@ describe('GupshupSmsProvider', () => {
     expect(parseGupshupResponse('error | foo | bar').detail).toBe('bar');
   });
 });
+
+describe('GupshupSmsProvider, abort (case 13)', () => {
+  it('passes the signal to fetch and stops retrying once it aborts', async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const fn = vi.fn(async (_: unknown, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return new Response('', { status: 503 });
+    }) as unknown as typeof fetch;
+    const p = new GupshupSmsProvider({
+      auth: { mode: 'apikey', apiKey: 'key' },
+      sender: 'JADEDM',
+      fetchImpl: fn,
+      maxRetries: 5,
+      retryBaseMs: 50,
+    });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error('core gave up')), 10);
+    await expect(p.send({ to: '+919999', body: 'code' }, { signal: controller.signal })).rejects.toThrow('core gave up');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(signals[0]).toBe(controller.signal);
+  });
+});

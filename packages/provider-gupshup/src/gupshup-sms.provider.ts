@@ -100,13 +100,21 @@ export class GupshupSmsProvider implements SmsProvider {
     };
   }
 
-  async send(params: SmsSendParams): Promise<SmsSendResult> {
+  /**
+   * Retries transient failures with backoff. `options.signal` is passed to
+   * fetch; once it aborts, no further attempt starts and the backoff wait ends.
+   * The options type is written out rather than imported, so these
+   * declarations still type-check against a core version that lacks it.
+   */
+  async send(params: SmsSendParams, options?: { signal?: AbortSignal }): Promise<SmsSendResult> {
+    const signal = options?.signal;
     let attempt = 0;
     let lastTransient: string | null = null;
     while (attempt <= this.opts.maxRetries) {
+      signal?.throwIfAborted();
       const url = this.buildUrl(params);
       const [res, fetchErr] = await asyncHandler(
-        this.opts.fetchImpl(url, { method: 'GET' }),
+        this.opts.fetchImpl(url, { method: 'GET', signal }),
       );
       const status = res?.status ?? 0;
       const [body, bodyErr] = res
@@ -130,7 +138,7 @@ export class GupshupSmsProvider implements SmsProvider {
       // transient
       lastTransient = outcome.message;
       if (attempt === this.opts.maxRetries) break;
-      await this.sleep(this.opts.retryBaseMs * 2 ** attempt);
+      await this.sleep(this.opts.retryBaseMs * 2 ** attempt, signal);
       attempt++;
     }
     throw new GupshupTransientError(
@@ -156,8 +164,20 @@ export class GupshupSmsProvider implements SmsProvider {
     return u.toString();
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms));
+  /** Waits `ms`, or rejects with the abort reason as soon as `signal` aborts. */
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(signal.reason);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }
 
