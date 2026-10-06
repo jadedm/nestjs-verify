@@ -115,21 +115,25 @@ Changesets. A user-facing change (runtime behaviour, public API, types, dependen
 behaviour) needs a `pnpm changeset` file; internal-only changes do not. Pre-1.0, a `minor` bump means
 breaking.
 
-The intended path is `.github/workflows/release.yml`: on push to `main`, `changesets/action` either
-opens a "Version Packages" PR or, with no pending changesets, publishes any package whose local
-version is not on npm, through npm Trusted Publishing (OIDC). As of 0.6.0 that path has never
-succeeded: every release run with something to publish failed with `E404 Not Found - PUT`, npm's
-answer to an unauthenticated publish. The workflow runs Node 22, whose bundled npm 10 cannot do
-trusted publishing (it needs 11.5.1 or later), and trusted publishers are probably not configured
-on npmjs.com either (#19). Every version on npm (0.1.0 to 0.5.0) was published by hand from the
-maintainer's account.
+Release path, `.github/workflows/release.yml`, on every push to `main`:
+- With pending changesets, `changesets/action` opens or updates a "Version Packages" PR (Actions is
+  allowed to create PRs in this repo).
+- With none, it publishes every package whose local version is not on npm, through npm trusted
+  publishing (OIDC, no token). The job upgrades npm to 11 and `scripts/check-publish-env.mjs` fails
+  the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 failed with
+  E404: the job ran npm 10, which cannot publish with OIDC, and no trusted publishers were set up.
+  It also runs `check:exports` before publishing.
+- Each package needs a trusted publisher on npmjs.com (owner step, per package). Until a CI publish
+  has gone through, #19 stays open.
 
-Until #19 is done, publish with `scripts/publish-manual.sh`, run by the owner in their own terminal
-after `npm login`. npm asks for 2FA as a browser approval, so `--otp` is optional. From a shell with
-no terminal attached (an agent's shell) the publish fails with `EOTP`, so hand the command over.
+Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. npm
+asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
+agent's shell) the publish fails with `EOTP`, so hand the command over. Every version through 0.6.3
+was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
+`pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
+release PRs dropped.
 
-Releases so far have been cut as `release/x.y.z` branches with hand-bumped versions, not through a
-"Version Packages" PR. A core `minor` changeset would currently version every package 1.0.0 (#10).
+A core `minor` changeset would currently version every package 1.0.0 (#10), so changes ship as patch.
 
 The `linked` group in `.changeset/config.json` lists only core, twilio, postgres and ses. Gupshup,
 mongo and redis are outside it even though the README says all packages version in lockstep.
