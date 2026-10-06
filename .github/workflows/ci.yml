@@ -23,6 +23,9 @@ jobs:
       # @jadedm/nestjs-verify via its package.json "types" field, which
       # points at dist/index.d.ts.
       - run: pnpm build
+      # Load every package's built ESM and CommonJS entry in plain Node, as a
+      # consumer would. Unit tests never load dist (#21).
+      - run: pnpm check:exports
       - run: pnpm typecheck
       - run: pnpm test
 
