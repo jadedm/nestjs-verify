@@ -4,6 +4,21 @@ export class DeliveryTimeoutError extends Error {
 }
 
 /**
+ * Every provider in the chain failed. `mayHaveSent` is true when at least one
+ * attempt timed out rather than failing outright: that request may still
+ * reach the recipient.
+ */
+export class DeliveryChainError extends Error {
+  override name = 'DeliveryChainError';
+  constructor(
+    message: string,
+    readonly mayHaveSent: boolean,
+  ) {
+    super(message);
+  }
+}
+
+/**
  * Runs `run` with a signal that is aborted after `ms`, and settles with
  * whichever comes first: the attempt or the deadline. The timer is cleared
  * when the attempt wins. An attempt that settles after the deadline is

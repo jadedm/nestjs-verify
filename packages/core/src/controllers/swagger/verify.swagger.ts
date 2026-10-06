@@ -49,7 +49,8 @@ export const VerifySwagger = {
     }),
     smsFailed: ApiResponse({
       status: 503,
-      description: 'All configured providers for the channel failed to send the code.',
+      description:
+        'The code could not be sent, or recording the send failed (SMS_DISPATCH_FAILED). When a message may still have gone out, because an attempt timed out or the send succeeded before the failure, the cooldown is started and, if that succeeded, the body carries retryAfterMs; an immediate retry then gets 429.',
     }),
   },
 

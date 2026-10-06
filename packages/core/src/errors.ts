@@ -26,7 +26,11 @@ export const VerifyErrorCode = {
   IpRateLimited: 'IP_RATE_LIMITED',
   /** IP is touching too many distinct phones (velocity heuristic). HTTP 429. */
   AbuseVelocity: 'ABUSE_VELOCITY',
-  /** All configured providers for the channel failed (SMS or email). HTTP 503. */
+  /**
+   * The code could not be sent, or recording the send failed (SMS or email).
+   * HTTP 503. Carries retryAfterMs when a message may have gone out and the
+   * cooldown was started.
+   */
   SmsDispatchFailed: 'SMS_DISPATCH_FAILED',
   /** No active verification for this phone (on check). HTTP 400. */
   NoPendingVerification: 'NO_PENDING_VERIFICATION',
@@ -44,7 +48,11 @@ export type VerifyErrorCode =
 export interface VerifyErrorPayload {
   code: VerifyErrorCode;
   message: string;
-  /** Present on `COOLDOWN_ACTIVE`. Milliseconds the client should wait. */
+  /**
+   * Milliseconds the client should wait. Present on `COOLDOWN_ACTIVE`, and on
+   * `SMS_DISPATCH_FAILED` when a message may have gone out and the cooldown
+   * was started.
+   */
   retryAfterMs?: number;
   /** Present on rate-limit errors. Unix milliseconds at which the window resets. */
   resetAt?: number;
@@ -120,11 +128,17 @@ export class AbuseVelocityException extends VerifyException {
 }
 
 export class SmsDispatchFailedException extends VerifyException {
-  constructor() {
+  /**
+   * @param retryAfterMs Set when a message may have gone out (an attempt timed
+   *   out, or the send succeeded before a later failure) and the cooldown was
+   *   started: a retry is accepted after this long.
+   */
+  constructor(retryAfterMs?: number) {
     super(
       VerifyErrorCode.SmsDispatchFailed,
       'Unable to dispatch verification code. Please try again.',
       HttpStatus.SERVICE_UNAVAILABLE,
+      retryAfterMs === undefined ? {} : { retryAfterMs },
     );
   }
 }

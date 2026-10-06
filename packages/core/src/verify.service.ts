@@ -3,7 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { VERIFY_MODULE_OPTIONS } from './interfaces/module-options.interface.js';
 import type { VerifyModuleOptions } from './interfaces/module-options.interface.js';
 import { asyncHandler } from './utils/async-handler.js';
-import { DeliveryTimeoutError, withDeadline } from './utils/deadline.js';
+import { DeliveryChainError, DeliveryTimeoutError, withDeadline } from './utils/deadline.js';
 import { withSpan } from './tracing/tracer.js';
 import { TELEMETRY, BLOCK_REASON, CHECK_OUTCOME, SMS_OUTCOME } from './constants.js';
 import {
@@ -225,39 +225,22 @@ export class VerifyService {
       ip: params.ip,
       channel,
     });
-    // The send and the bookkeeping that must follow it fail together: if the
-    // cooldown or the send record cannot be written, the verification is
-    // removed and the caller gets 503. The code may
-    // already have been delivered, so a retry can send a second one; only the
-    // per-recipient rate limit counts it.
-    const [provider, sendErr] = await asyncHandler(
-      this.sendCode(recipient, code).then(async (sentBy) => {
-        await this.options.stores.cooldown.start(phone, cooldownSeconds);
-        await this.options.stores.abuse?.recordSendAttempt({
-          sid,
-          phone,
-          ip: params.ip,
-          channel,
-          provider: sentBy,
-          success: true,
-        });
-        return sentBy;
-      }),
+    // A failed start removes the verification and answers 503. When a message
+    // may have gone out (an attempt timed out, or the send succeeded and the
+    // bookkeeping after it failed), the cooldown is started first, before any
+    // cleanup that can itself fail, so an immediate retry cannot send again
+    // (#28). A retry after a definite send can still deliver a second code;
+    // only the per-recipient rate limit counts it.
+    const fail = (err: Error, mayHaveSent: boolean) =>
+      this.failStart({ sid, phone, ip: params.ip, channel, cooldownSeconds, kind: recipient.kind }, err, mayHaveSent);
+    const [provider, sendErr] = await asyncHandler(this.sendCode(recipient, code));
+    // Only a chain failure where no attempt timed out is known not to have
+    // sent; anything else (an error after a successful attempt) may have.
+    if (sendErr) throw await fail(sendErr, !(sendErr instanceof DeliveryChainError) || sendErr.mayHaveSent);
+    const [, bookkeepingErr] = await asyncHandler(
+      this.recordSent({ sid, phone, ip: params.ip, channel, cooldownSeconds, provider }),
     );
-    if (sendErr) {
-      await this.options.stores.verify.delete(sid);
-      await this.options.stores.phoneIndex.delete(phone);
-      await this.options.stores.abuse?.recordSendAttempt({
-        sid,
-        phone,
-        ip: params.ip,
-        channel,
-        provider: this.chainName(recipient.kind),
-        success: false,
-        errorCode: sendErr.message,
-      });
-      throw new SmsDispatchFailedException();
-    }
+    if (bookkeepingErr) throw await fail(bookkeepingErr, true);
     this.vlog(`start: dispatched sid=${sid} via ${provider}; cooldown=${cooldownSeconds}s`);
     this.metrics.startsTotal();
     await this.audit({
@@ -402,6 +385,7 @@ export class VerifyService {
     // Monotonic, so a wall-clock step cannot stretch or shrink the budget.
     const chainStart = performance.now();
     let lastError: unknown;
+    let timedOut = false;
     for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
       const remainingMs = this.totalTimeoutMs - (performance.now() - chainStart);
       if (remainingMs < MIN_ATTEMPT_WINDOW_MS) {
@@ -438,13 +422,90 @@ export class VerifyService {
       }
       if (!err) return deliverer.name;
       lastError = err;
+      if (err instanceof DeliveryTimeoutError) timedOut = true;
       this.log.warn(
         `provider ${deliverer.name} failed for ${this.redact(recipient.key)}: ${
           (err as Error).message
         }`,
       );
     }
-    throw lastError ?? new Error(`All ${recipient.kind} providers failed`);
+    const message = lastError instanceof Error ? lastError.message : `All ${recipient.kind} providers failed`;
+    throw new DeliveryChainError(message, timedOut);
+  }
+
+  /** Writes what a successful send requires: the cooldown and the send record. */
+  private async recordSent(sent: {
+    sid: string;
+    phone: string;
+    ip?: string;
+    channel: VerificationChannel;
+    cooldownSeconds: number;
+    provider: string;
+  }): Promise<void> {
+    await this.options.stores.cooldown.start(sent.phone, sent.cooldownSeconds);
+    await this.options.stores.abuse?.recordSendAttempt({
+      sid: sent.sid,
+      phone: sent.phone,
+      ip: sent.ip,
+      channel: sent.channel,
+      provider: sent.provider,
+      success: true,
+    });
+  }
+
+  /**
+   * Cleans up after a failed start and returns the 503. When a message may
+   * have gone out, the cooldown is started before any cleanup step that can
+   * throw, and the 503 carries retryAfterMs when it was started.
+   */
+  private async failStart(
+    ctx: {
+      sid: string;
+      phone: string;
+      ip?: string;
+      channel: VerificationChannel;
+      cooldownSeconds: number;
+      kind: DeliveryKind;
+    },
+    err: Error,
+    mayHaveSent: boolean,
+  ): Promise<SmsDispatchFailedException> {
+    const cooledDown = mayHaveSent && (await this.startCooldownAfterFailure(ctx.phone, ctx.cooldownSeconds));
+    // Each cleanup step runs even if an earlier one fails, and none of them
+    // turns the answer into a 500: the caller still gets the documented 503.
+    await this.tryCleanup('verification delete', () => this.options.stores.verify.delete(ctx.sid));
+    await this.tryCleanup('index delete', () => this.options.stores.phoneIndex.delete(ctx.phone));
+    await this.tryCleanup('failure record', async () => {
+      await this.options.stores.abuse?.recordSendAttempt({
+        sid: ctx.sid,
+        phone: ctx.phone,
+        ip: ctx.ip,
+        channel: ctx.channel,
+        provider: this.chainName(ctx.kind),
+        success: false,
+        errorCode: err.message,
+      });
+    });
+    const retryAfterMs = ctx.cooldownSeconds * 1000;
+    return cooledDown && retryAfterMs > 0
+      ? new SmsDispatchFailedException(retryAfterMs)
+      : new SmsDispatchFailedException();
+  }
+
+  /** Runs one cleanup step after a failed start; a failure is logged, never thrown. */
+  private async tryCleanup(step: string, run: () => Promise<unknown>): Promise<void> {
+    const [, err] = await asyncHandler(Promise.resolve().then(run));
+    if (err) this.log.warn(`start: ${step} after a failed send did not complete: ${err.message}`);
+  }
+
+  /** True when the cooldown was written. Never throws, even for a synchronous store error. */
+  private async startCooldownAfterFailure(phone: string, cooldownSeconds: number): Promise<boolean> {
+    const [, err] = await asyncHandler(
+      Promise.resolve().then(() => this.options.stores.cooldown.start(phone, cooldownSeconds)),
+    );
+    if (!err) return true;
+    this.log.warn(`start: cooldown after a failed send could not be written for ${this.redact(phone)}: ${err.message}`);
+    return false;
   }
 
   private chainName(kind: DeliveryKind): string {
