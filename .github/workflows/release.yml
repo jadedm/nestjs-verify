@@ -18,16 +18,25 @@ jobs:
       - uses: pnpm/action-setup@v3
         with:
           version: 9
+      # No dependency cache in a job that publishes: npm's trusted publishing
+      # guide advises against it, since a poisoned cache would ship.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
           registry-url: https://registry.npmjs.org
+      # Trusted publishing (OIDC) needs npm 11.5.1+; Node 22 bundles npm 10,
+      # which answers an OIDC publish with E404 (#19). pnpm publish runs this
+      # npm for the upload.
+      - run: npm install -g npm@11
+      - run: node scripts/check-publish-env.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # Trusted Publishing via OIDC — no NPM_TOKEN secret needed.
-      # Requires the package to be configured for trusted publishing on
-      # npmjs.com (per-package: Settings -> Trusted Publishers).
+      # Never publish a build that a consumer could not load.
+      - run: pnpm check:exports
+      # Trusted publishing via OIDC: no NPM_TOKEN secret, and NODE_AUTH_TOKEN
+      # must stay unset. Each package needs a trusted publisher on npmjs.com
+      # (package Settings, Trusted Publisher: GitHub Actions, repository
+      # jadedm/nestjs-verify, workflow release.yml). Provenance is automatic.
       - uses: changesets/action@v1
         with:
           publish: pnpm release
