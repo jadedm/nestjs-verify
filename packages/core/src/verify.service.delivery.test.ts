@@ -212,6 +212,73 @@ describe('VerifyService, delivery limits', () => {
     );
   });
 
+  describe('cooldown after a timed-out send (#28)', () => {
+    const fails = async () => {
+      throw new Error('rejected');
+    };
+    const failure = async (p: Promise<unknown>) => {
+      const err = await p.then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(VerifyException);
+      return err as VerifyException;
+    };
+
+    it('starts the cooldown and says when to retry when every attempt timed out (case 1)', async () => {
+      const only = provider('stuck', never);
+      const service = build({ provider: only.p }, { attemptTimeoutMs: 20 }, { attempts: { cooldownSeconds: 30 } });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
+      expect(err.extras.retryAfterMs).toBe(30_000);
+      expect(await stores.cooldown.remaining(PHONE)).toBeGreaterThan(29_000);
+      const retry = await failure(service.start({ to: PHONE }));
+      expect(retry.code).toBe(VerifyErrorCode.CooldownActive);
+      expect(only.p.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts no cooldown when every attempt failed outright (case 2)', async () => {
+      const only = provider('down', fails);
+      const service = build({ provider: only.p });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
+      expect(err.extras.retryAfterMs).toBeUndefined();
+      expect(await stores.cooldown.remaining(PHONE)).toBe(0);
+      await failure(service.start({ to: PHONE }));
+      expect(only.p.send).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ['primary times out, fallback rejects (case 3)', never, fails],
+      ['primary rejects, fallback times out (case 4)', fails, never],
+    ])('starts the cooldown when %s', async (_, first, second) => {
+      const a = provider('a', first);
+      const b = provider('b', second);
+      const service = build({ provider: a.p, fallbacks: [b.p] }, { attemptTimeoutMs: 20 });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.extras.retryAfterMs).toBe(30_000);
+      expect(await stores.cooldown.remaining(PHONE)).toBeGreaterThan(0);
+    });
+
+    it('still answers 503 when the cooldown cannot be written (case 5)', async () => {
+      const only = provider('stuck', never);
+      const service = build({ provider: only.p }, { attemptTimeoutMs: 20 });
+      vi.spyOn(stores.cooldown, 'start').mockRejectedValue(new Error('store down'));
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
+      expect(err.extras.retryAfterMs).toBeUndefined();
+    });
+
+    it('still removes the verification and records the failure (cases 6, 7)', async () => {
+      const only = provider('stuck', never);
+      const service = build({ provider: only.p }, { attemptTimeoutMs: 20 });
+      const recorded = vi.spyOn(stores.abuse, 'recordSendAttempt');
+      await failure(service.start({ to: PHONE }));
+      expect(await stores.phoneIndex.get(PHONE)).toBeNull();
+      expect(recorded).toHaveBeenCalledWith(expect.objectContaining({ success: false, provider: 'stuck' }));
+    });
+  });
+
   it('keeps the provider request id in the logged error (case 14)', async () => {
     const failing: SmsProvider = {
       name: 'aws-like',

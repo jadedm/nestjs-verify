@@ -84,7 +84,7 @@ VerifyModule.forRootAsync({
 })
 ```
 
-`delivery` bounds how long `POST /verify/start` waits on providers. An attempt that runs past `attemptTimeoutMs` counts as a failure and the next provider in `fallbacks` is tried; once `totalTimeoutMs` is spent, no further provider is tried and the request fails with 503 `SMS_DISPATCH_FAILED`. Each attempt's `send` gets an `AbortSignal` that fires at its limit. A request already in flight may still deliver: a fallback can then send a second message carrying the same code, and when every attempt times out, the 503 may follow a message that did arrive. Limits above 2147483647 ms are refused, because Node's timers cannot represent them.
+`delivery` bounds how long `POST /verify/start` waits on providers. An attempt that runs past `attemptTimeoutMs` counts as a failure and the next provider in `fallbacks` is tried; once `totalTimeoutMs` is spent, no further provider is tried and the request fails with 503 `SMS_DISPATCH_FAILED`. Each attempt's `send` gets an `AbortSignal` that fires at its limit. A request already in flight may still deliver: a fallback can then send a second message carrying the same code, and when every attempt times out, the 503 may follow a message that did arrive. Because of that, when any attempt timed out the 503 also starts the recipient's cooldown and carries `retryAfterMs`, so an immediate retry gets 429 rather than starting another send. When every provider failed outright, nothing is in flight: no cooldown starts and a retry is accepted at once. Limits above 2147483647 ms are refused, because Node's timers cannot represent them.
 
 ## The five stores
 

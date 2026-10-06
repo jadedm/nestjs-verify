@@ -3,7 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { VERIFY_MODULE_OPTIONS } from './interfaces/module-options.interface.js';
 import type { VerifyModuleOptions } from './interfaces/module-options.interface.js';
 import { asyncHandler } from './utils/async-handler.js';
-import { DeliveryTimeoutError, withDeadline } from './utils/deadline.js';
+import { DeliveryChainError, DeliveryTimeoutError, withDeadline } from './utils/deadline.js';
 import { withSpan } from './tracing/tracer.js';
 import { TELEMETRY, BLOCK_REASON, CHECK_OUTCOME, SMS_OUTCOME } from './constants.js';
 import {
@@ -256,7 +256,7 @@ export class VerifyService {
         success: false,
         errorCode: sendErr.message,
       });
-      throw new SmsDispatchFailedException();
+      throw await this.dispatchFailure(sendErr, phone, cooldownSeconds);
     }
     this.vlog(`start: dispatched sid=${sid} via ${provider}; cooldown=${cooldownSeconds}s`);
     this.metrics.startsTotal();
@@ -402,6 +402,7 @@ export class VerifyService {
     // Monotonic, so a wall-clock step cannot stretch or shrink the budget.
     const chainStart = performance.now();
     let lastError: unknown;
+    let timedOut = false;
     for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
       const remainingMs = this.totalTimeoutMs - (performance.now() - chainStart);
       if (remainingMs < MIN_ATTEMPT_WINDOW_MS) {
@@ -438,13 +439,36 @@ export class VerifyService {
       }
       if (!err) return deliverer.name;
       lastError = err;
+      if (err instanceof DeliveryTimeoutError) timedOut = true;
       this.log.warn(
         `provider ${deliverer.name} failed for ${this.redact(recipient.key)}: ${
           (err as Error).message
         }`,
       );
     }
-    throw lastError ?? new Error(`All ${recipient.kind} providers failed`);
+    const message = lastError instanceof Error ? lastError.message : `All ${recipient.kind} providers failed`;
+    throw new DeliveryChainError(message, timedOut);
+  }
+
+  /**
+   * The 503 for a failed send. When an attempt timed out, its message may
+   * still arrive, so the cooldown starts anyway and the answer says when a
+   * retry is accepted: an immediate retry would otherwise start another send
+   * while the first may be in flight (#28).
+   */
+  private async dispatchFailure(
+    sendErr: Error,
+    phone: string,
+    cooldownSeconds: number,
+  ): Promise<SmsDispatchFailedException> {
+    const mayHaveSent = sendErr instanceof DeliveryChainError && sendErr.mayHaveSent;
+    if (!mayHaveSent) return new SmsDispatchFailedException();
+    const [, cooldownErr] = await asyncHandler(this.options.stores.cooldown.start(phone, cooldownSeconds));
+    if (cooldownErr) {
+      this.log.warn(`start: cooldown after a timed-out send failed for ${this.redact(phone)}: ${cooldownErr.message}`);
+      return new SmsDispatchFailedException();
+    }
+    return new SmsDispatchFailedException(cooldownSeconds * 1000);
   }
 
   private chainName(kind: DeliveryKind): string {
