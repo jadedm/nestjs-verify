@@ -6,13 +6,15 @@ import { SesEmailProvider } from './ses-email.provider.js';
 // request leaves the machine.
 const fakeClient = (answer: () => Promise<unknown>) => {
   const commands: SendEmailCommand[] = [];
+  const sendOptions: unknown[] = [];
   const client = {
-    send: async (command: SendEmailCommand) => {
+    send: async (command: SendEmailCommand, options?: unknown) => {
       commands.push(command);
+      sendOptions.push(options);
       return answer();
     },
   } as unknown as SESv2Client;
-  return { client, commands };
+  return { client, commands, sendOptions };
 };
 
 const params = { to: 'admin@example.com', subject: 'Your code', text: 'Your code is 123456.' };
@@ -49,5 +51,15 @@ describe('SesEmailProvider (case 13)', () => {
     const { client } = fakeClient(async () => ({}));
     const provider = new SesEmailProvider({ from: 'no-reply@example.com', client });
     await expect(provider.send(params)).rejects.toThrow('no MessageId');
+  });
+});
+
+describe('SesEmailProvider, abort (case 12)', () => {
+  it('passes the signal to the SDK as abortSignal', async () => {
+    const { client, sendOptions } = fakeClient(async () => ({ MessageId: 'm' }));
+    const provider = new SesEmailProvider({ from: 'no-reply@example.com', client });
+    const controller = new AbortController();
+    await provider.send(params, { signal: controller.signal });
+    expect(sendOptions[0]).toEqual({ abortSignal: controller.signal });
   });
 });

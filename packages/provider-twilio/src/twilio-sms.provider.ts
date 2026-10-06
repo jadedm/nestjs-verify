@@ -40,11 +40,20 @@ export class TwilioSmsProvider implements SmsProvider {
     this.retryBaseMs = opts.retryBaseMs ?? 250;
   }
 
-  async send(params: SmsSendParams): Promise<SmsSendResult> {
+  /**
+   * Retries transient failures with backoff. When `options.signal` aborts, no
+   * further attempt starts and the backoff wait ends; a request already sent
+   * to Twilio cannot be cancelled.
+   */
+  // The options type is written out rather than imported, so these
+  // declarations still type-check against a core version that lacks it.
+  async send(params: SmsSendParams, options?: { signal?: AbortSignal }): Promise<SmsSendResult> {
+    const signal = options?.signal;
     const useMessagingService = this.from.startsWith('MG');
     let attempt = 0;
     let lastErr: unknown;
     while (attempt <= this.maxRetries) {
+      signal?.throwIfAborted();
       try {
         const message = await this.client.messages.create({
           to: params.to,
@@ -59,14 +68,26 @@ export class TwilioSmsProvider implements SmsProvider {
         const status = (err as { status?: number }).status;
         if (status && !TRANSIENT_STATUS_CODES.has(status)) throw err;
         if (attempt === this.maxRetries) break;
-        await this.sleep(this.retryBaseMs * 2 ** attempt);
+        await this.sleep(this.retryBaseMs * 2 ** attempt, signal);
         attempt++;
       }
     }
     throw lastErr;
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms));
+  /** Waits `ms`, or rejects with the abort reason as soon as `signal` aborts. */
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(signal.reason);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }

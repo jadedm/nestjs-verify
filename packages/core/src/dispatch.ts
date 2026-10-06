@@ -4,7 +4,7 @@ import type { DeliveryKind } from './recipient.js';
 /** One provider, reduced to what the service needs to send a code. */
 export interface Deliverer {
   readonly name: string;
-  deliver(to: string, code: string): Promise<unknown>;
+  deliver(to: string, code: string, signal?: AbortSignal): Promise<unknown>;
 }
 
 export const DEFAULT_SMS_TEMPLATE =
@@ -20,10 +20,18 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * address). The error reaches logs, spans and the abuse store, so the
  * recipient is replaced with a placeholder before it leaves the deliverer.
  */
+// AWS SDK errors carry the request id needed for a support case here.
+const requestIdOf = (err: unknown): string | undefined => {
+  const id = (err as { $metadata?: { requestId?: unknown } } | null)?.$metadata?.requestId;
+  return typeof id === 'string' ? id : undefined;
+};
+
 const scrubbed = async <T>(to: string, send: () => Promise<T>): Promise<T> =>
   send().catch((err: unknown) => {
     const source = err instanceof Error ? err : new Error(String(err));
-    const clean = new Error(source.message.replace(new RegExp(escapeRegExp(to), 'gi'), '[recipient]'));
+    const message = source.message.replace(new RegExp(escapeRegExp(to), 'gi'), '[recipient]');
+    const requestId = requestIdOf(err);
+    const clean = new Error(requestId ? `${message} (request id ${requestId})` : message);
     clean.name = source.name;
     throw clean;
   });
@@ -33,7 +41,7 @@ const smsDeliverers = (options: VerifyModuleOptions): Deliverer[] => {
   const body = options.messageTemplate ?? DEFAULT_SMS_TEMPLATE;
   return [options.sms.provider, ...(options.sms.fallbacks ?? [])].map((p) => ({
     name: p.name,
-    deliver: (to, code) => scrubbed(to, () => p.send({ to, body: fill(body, code) })),
+    deliver: (to, code, signal) => scrubbed(to, () => p.send({ to, body: fill(body, code) }, { signal })),
   }));
 };
 
@@ -43,8 +51,10 @@ const emailDeliverers = (options: VerifyModuleOptions): Deliverer[] => {
   const text = template ?? options.messageTemplate ?? DEFAULT_SMS_TEMPLATE;
   return [options.email.provider, ...(options.email.fallbacks ?? [])].map((p) => ({
     name: p.name,
-    deliver: (to, code) =>
-      scrubbed(to, () => p.send({ to, subject: fill(subject, code), text: fill(text, code) })),
+    deliver: (to, code, signal) =>
+      scrubbed(to, () =>
+        p.send({ to, subject: fill(subject, code), text: fill(text, code) }, { signal }),
+      ),
   }));
 };
 
