@@ -165,6 +165,13 @@ describe('VerifyService, delivery limits', () => {
     expect((await service.start({ to: PHONE })).state).toBe('pending');
   });
 
+  it('does not start a provider with only a sliver of the total left (case 1d)', async () => {
+    const chain = ['a', 'b'].map((n) => provider(n, never));
+    const service = build({ provider: chain[0].p, fallbacks: [chain[1].p] }, { attemptTimeoutMs: 95, totalTimeoutMs: 100 });
+    expect(await errorCode(service.start({ to: PHONE }))).toBe(VerifyErrorCode.SmsDispatchFailed);
+    expect(chain[1].p.send).not.toHaveBeenCalled();
+  });
+
   it('gives an attempt only the time left in the total (case 1c)', async () => {
     const only = provider('stuck', never);
     const service = build({ provider: only.p }, { attemptTimeoutMs: 400, totalTimeoutMs: 40 });

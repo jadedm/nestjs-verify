@@ -85,6 +85,9 @@ const DEFAULTS = {
 // time every attempt out at once.
 const MAX_TIMER_MS = 2_147_483_647;
 const isValidLimitMs = (ms: number) => Number.isFinite(ms) && ms > 0 && ms <= MAX_TIMER_MS;
+// Timers fire a little early or late against performance.now(), so the budget
+// can end with a sliver left. No provider is started with less than this.
+const MIN_ATTEMPT_WINDOW_MS = 10;
 
 @Injectable()
 export class VerifyService {
@@ -401,7 +404,7 @@ export class VerifyService {
     let lastError: unknown;
     for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
       const remainingMs = this.totalTimeoutMs - (performance.now() - chainStart);
-      if (remainingMs <= 0) {
+      if (remainingMs < MIN_ATTEMPT_WINDOW_MS) {
         lastError = new DeliveryTimeoutError(
           `delivery limit of ${this.totalTimeoutMs} ms reached before ${deliverer.name} was tried`,
         );
