@@ -9,23 +9,32 @@ import { VerifySwagger } from './swagger/verify.swagger.js';
 @ApiTags('Verify')
 @Controller('verify')
 export class VerifyController {
+  // `#` fields, so a subclass declaring its own members cannot clash with them.
+  readonly #options?: VerifyModuleOptions;
+
   // Tokens are explicit so injection does not depend on emitted decorator
-  // metadata, which some compilers (esbuild, used by vitest) leave out.
+  // metadata, which some compilers (esbuild, used by vitest) leave out. The
+  // options are optional: an app may register this controller in its own
+  // module, where VERIFY_MODULE_OPTIONS is not visible.
   constructor(
     @Inject(VerifyService) private readonly verify: VerifyService,
     @Optional()
     @Inject(VERIFY_MODULE_OPTIONS)
-    private readonly options?: VerifyModuleOptions,
-  ) {}
+    options?: VerifyModuleOptions,
+  ) {
+    this.#options = options;
+  }
 
   /**
    * With forRootAsync, the controller is registered before the factory runs,
    * so a `registerController: false` returned from the factory cannot keep it
-   * out. It is honoured here instead: both routes answer 404, the same body
-   * Nest gives for a route that does not exist (#18).
+   * out. It is honoured here instead: both routes answer 404 and never reach
+   * VerifyService (#18). Global guards and pipes still run before this, so a
+   * caller can tell the route exists; only `registerController` on the
+   * forRootAsync options removes it entirely.
    */
-  private assertMounted(route: 'start' | 'check'): void {
-    if (this.options?.registerController !== false) return;
+  #assertMounted(route: 'start' | 'check'): void {
+    if (this.#options?.registerController !== false) return;
     throw new NotFoundException(`Cannot POST /verify/${route}`);
   }
 
@@ -38,7 +47,7 @@ export class VerifyController {
   @VerifySwagger.start.invalid
   @VerifySwagger.start.smsFailed
   start(@Body() body: StartVerificationDto, @Ip() ip: string) {
-    this.assertMounted('start');
+    this.#assertMounted('start');
     return this.verify.start({
       to: body.to,
       channel: body.channel,
@@ -53,7 +62,7 @@ export class VerifyController {
   @VerifySwagger.check.noVerification
   @VerifySwagger.check.expired
   check(@Body() body: CheckVerificationDto, @Ip() ip: string) {
-    this.assertMounted('check');
+    this.#assertMounted('check');
     return this.verify.check({
       to: body.to,
       code: body.code,

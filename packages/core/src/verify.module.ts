@@ -22,7 +22,8 @@ const controllerSettingCheck = (mounted: boolean): Provider => ({
     if (!mounted || options.registerController !== false) return true;
     new Logger('VerifyModule').error(
       'registerController: false was returned from forRootAsync useFactory, where it cannot keep the controller out: ' +
-        'it is registered and answers 404 on every request. Set registerController on the forRootAsync options instead.',
+        'it is registered, and its handlers refuse every request with 404 (global guards and pipes still run first). ' +
+        'Set registerController on the forRootAsync options instead.',
     );
     return false;
   },

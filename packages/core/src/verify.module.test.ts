@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { Logger, NotFoundException } from '@nestjs/common';
+import { Logger, Module, NotFoundException } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VerifyModule } from './verify.module.js';
@@ -86,6 +86,7 @@ describe('VerifyModule controller registration (#18)', () => {
     expect(startErr).toBeInstanceOf(NotFoundException);
     expect((startErr as NotFoundException).message).toBe('Cannot POST /verify/start');
     expect(checkErr).toBeInstanceOf(NotFoundException);
+    expect((checkErr as NotFoundException).message).toBe('Cannot POST /verify/check');
     await app.close();
   });
 
@@ -94,6 +95,18 @@ describe('VerifyModule controller registration (#18)', () => {
     const controller = app.get(VerifyController, { strict: false });
     const started = await controller.start({ to: '+14155552671' }, '127.0.0.1');
     expect(started.state).toBe('pending');
+    await app.close();
+  });
+
+  it('boots and serves when an app registers VerifyController in its own module (review: @Optional)', async () => {
+    @Module({
+      imports: [VerifyModule.forRootAsync({ registerController: false, useFactory: () => options() })],
+      controllers: [VerifyController],
+    })
+    class OwnRoutes {}
+    const app = await NestFactory.createApplicationContext(OwnRoutes, { logger: false });
+    const controller = app.get(VerifyController, { strict: false });
+    expect((await controller.start({ to: '+14155552671' }, '127.0.0.1')).state).toBe('pending');
     await app.close();
   });
 

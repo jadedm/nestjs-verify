@@ -114,7 +114,8 @@ export interface VerifyModuleOptions {
    * Mount the built-in /verify controller. Default true. With `forRootAsync`,
    * set `registerController` on the async options instead. A `false` returned
    * from `useFactory` cannot keep the controller from being registered: its
-   * routes then answer 404, and an error is logged at startup.
+   * handlers then answer 404 and never reach VerifyService, and an error is
+   * logged at startup (not when a request-scoped provider is in `inject`).
    */
   registerController?: boolean;
   /** SMS body template. {{code}} is replaced. Also the email body when `email.template` is unset. */
@@ -136,7 +137,8 @@ export interface VerifyModuleAsyncOptions
   /**
    * Mount the built-in /verify controller. Default true. Set it here, not in
    * the `useFactory` result: the controller list is fixed before the factory
-   * runs, so a `false` from the factory only makes the routes answer 404.
+   * runs, so a `false` from the factory only makes the handlers answer 404;
+   * global guards and pipes still see the request.
    */
   registerController?: boolean;
   inject?: any[];
