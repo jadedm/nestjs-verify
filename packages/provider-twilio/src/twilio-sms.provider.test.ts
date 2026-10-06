@@ -107,3 +107,45 @@ describe('TwilioSmsProvider, abort (case 16)', () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe('TwilioSmsProvider, may-have-sent mark (#33)', () => {
+  const failWith = (...errors: object[]) => {
+    let i = 0;
+    return vi.fn(async () => {
+      throw errors[Math.min(i++, errors.length - 1)];
+    });
+  };
+  const httpErr = (status: number) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const netErr = (code: string) => Object.assign(new Error(code), { code });
+  const thrown = async (create: ReturnType<typeof failWith>) => {
+    const p = patchMessages(makeProvider(2, 1), create);
+    return p.send({ to: '+14155552671', body: 'hi' }).then(
+      () => undefined,
+      (e: unknown) => e as { mayHaveSent?: unknown; status?: number },
+    );
+  };
+
+  it('marks a failure when every attempt answered 504 (case 5)', async () => {
+    expect((await thrown(failWith(httpErr(504))))?.mayHaveSent).toBe(true);
+  });
+
+  it.each([503, 429])('does not mark when every attempt answered %s (case 6)', async (status) => {
+    expect((await thrown(failWith(httpErr(status))))?.mayHaveSent).toBeUndefined();
+  });
+
+  it('marks a reset connection, not a refused one or a failed lookup (case 7)', async () => {
+    expect((await thrown(failWith(netErr('ECONNRESET'))))?.mayHaveSent).toBe(true);
+    expect((await thrown(failWith(netErr('ECONNREFUSED'))))?.mayHaveSent).toBeUndefined();
+    expect((await thrown(failWith(netErr('ENOTFOUND'))))?.mayHaveSent).toBeUndefined();
+  });
+
+  it('marks a terminal 400 that followed an uncertain 504 (case 8)', async () => {
+    const err = await thrown(failWith(httpErr(504), httpErr(400)));
+    expect(err?.status).toBe(400);
+    expect(err?.mayHaveSent).toBe(true);
+  });
+
+  it('does not mark a 400 on its own (case 9)', async () => {
+    expect((await thrown(failWith(httpErr(400))))?.mayHaveSent).toBeUndefined();
+  });
+});

@@ -26,6 +26,27 @@ export interface TwilioSmsProviderOptions {
  */
 const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Failures after which Twilio may already have accepted the message. 429 and
+ * 503 are refusals; a 500, 502 or 504 can come after the message was queued.
+ * A network error with no HTTP status may have left after the request was
+ * written, unless the connection was never made.
+ */
+const UNCERTAIN_STATUS_CODES = new Set([500, 502, 504]);
+const NEVER_CONNECTED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+
+const mayHaveBeenAccepted = (err: unknown): boolean => {
+  const { status, code } = (err ?? {}) as { status?: unknown; code?: unknown };
+  if (typeof status === 'number') return UNCERTAIN_STATUS_CODES.has(status);
+  return !(typeof code === 'string' && NEVER_CONNECTED.has(code));
+};
+
+/** Marks the error the way the core reads it (`mayHaveSent: true`), when any attempt was uncertain. */
+const markIfUncertain = (err: unknown, uncertain: boolean): unknown => {
+  if (!uncertain || typeof err !== 'object' || err === null) return err;
+  return Object.assign(err, { mayHaveSent: true });
+};
+
 export class TwilioSmsProvider implements SmsProvider {
   readonly name = 'twilio';
   private readonly client: Twilio;
@@ -52,6 +73,9 @@ export class TwilioSmsProvider implements SmsProvider {
     const useMessagingService = this.from.startsWith('MG');
     let attempt = 0;
     let lastErr: unknown;
+    // Once any attempt may have been accepted, the final error says so, even
+    // if a later attempt failed cleanly.
+    let uncertain = false;
     while (attempt <= this.maxRetries) {
       signal?.throwIfAborted();
       try {
@@ -65,14 +89,15 @@ export class TwilioSmsProvider implements SmsProvider {
         return { providerMessageId: message.sid, provider: this.name };
       } catch (err) {
         lastErr = err;
+        uncertain = uncertain || mayHaveBeenAccepted(err);
         const status = (err as { status?: number }).status;
-        if (status && !TRANSIENT_STATUS_CODES.has(status)) throw err;
+        if (status && !TRANSIENT_STATUS_CODES.has(status)) throw markIfUncertain(err, uncertain);
         if (attempt === this.maxRetries) break;
         await this.sleep(this.retryBaseMs * 2 ** attempt, signal);
         attempt++;
       }
     }
-    throw lastErr;
+    throw markIfUncertain(lastErr, uncertain);
   }
 
   /** Waits `ms`, or rejects with the abort reason as soon as `signal` aborts. */
