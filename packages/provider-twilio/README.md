@@ -34,6 +34,8 @@ Transient errors (HTTP 429 and 5xx) are retried with exponential backoff: `retry
 
 Terminal errors (invalid number, blocked recipient, geo permission, anything that is not 429/5xx) are not retried and are surfaced to the caller.
 
+When any attempt may have been accepted by Twilio (HTTP 500, 502 or 504, a response that broke after its headers, or a network error other than those listed below), the thrown error carries `mayHaveSent: true`, even if a later attempt failed cleanly. `@jadedm/nestjs-verify` then starts the recipient's cooldown so an immediate retry does not send a second message. A refused connection, a DNS failure, an unreachable host or network, 429 and 503 are not marked; any other network error is marked, which errs toward a cooldown. The adapter's own retries still run after an uncertain attempt and can deliver the same code again (#43).
+
 ## Peers
 
 - `@jadedm/nestjs-verify` 0.x

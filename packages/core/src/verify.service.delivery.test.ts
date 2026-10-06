@@ -363,6 +363,51 @@ describe('VerifyService, delivery limits', () => {
       expect(err.extras.retryAfterMs).toBeUndefined();
     });
 
+    it('cools down when a provider says its request may have been accepted (#33 case 1)', async () => {
+      const flagged = provider('flagged', async () => {
+        throw Object.assign(new Error(`HTTP 504 for ${PHONE}`), { mayHaveSent: true });
+      });
+      const service = build({ provider: flagged.p });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
+      expect(err.extras.retryAfterMs).toBe(30_000);
+      expect((await failure(service.start({ to: PHONE }))).code).toBe(VerifyErrorCode.CooldownActive);
+      expect(flagged.p.send).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([false, 'true', 1, undefined])('ignores a mayHaveSent of %s (#33 case 2)', async (value) => {
+      const p = provider('p', async () => {
+        throw Object.assign(new Error('refused'), { mayHaveSent: value });
+      });
+      const service = build({ provider: p.p });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.extras.retryAfterMs).toBeUndefined();
+      expect(await stores.cooldown.remaining(PHONE)).toBe(0);
+    });
+
+    it('keeps the flag through the recipient scrub (#33 case 3)', async () => {
+      const flagged = provider('flagged', async () => {
+        throw Object.assign(new Error(`reset while sending to ${PHONE}`), { mayHaveSent: true });
+      });
+      const recorded = vi.spyOn(stores.abuse, 'recordSendAttempt');
+      const service = build({ provider: flagged.p });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.extras.retryAfterMs).toBe(30_000);
+      const codes = recorded.mock.calls.map((c) => String(c[0].errorCode)).join(' ');
+      expect(codes).not.toContain(PHONE);
+    });
+
+    it('cools down when a flagged primary is followed by a fallback that fails outright (#33 case 4)', async () => {
+      const flagged = provider('flagged', async () => {
+        throw Object.assign(new Error('HTTP 502'), { mayHaveSent: true });
+      });
+      const down = provider('down', fails);
+      const service = build({ provider: flagged.p, fallbacks: [down.p] });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(down.p.send).toHaveBeenCalledTimes(1);
+      expect(err.extras.retryAfterMs).toBe(30_000);
+    });
+
     it('scrubs the recipient from a provider that throws synchronously (review P4)', async () => {
       const throwing: SmsProvider = {
         name: 'sync',

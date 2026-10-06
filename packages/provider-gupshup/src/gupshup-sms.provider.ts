@@ -58,6 +58,41 @@ type Outcome =
 
 const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Failures after which Gupshup may already have accepted the message: a 500,
+ * 502 or 504; a body that could not be read after a response arrived; a
+ * network error after connecting. 429 and 503 are refusals, and a refused
+ * connection or failed DNS lookup never reached Gupshup.
+ */
+const UNCERTAIN_STATUS_CODES = new Set([500, 502, 504]);
+// A connect timeout (UND_ERR_CONNECT_TIMEOUT from undici) never finished the
+// handshake, so the request cannot have reached Gupshup.
+const NEVER_CONNECTED = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+// fetch (undici) puts the system error code on `cause`.
+const errorCode = (err: Error): unknown =>
+  (err as { cause?: { code?: unknown } }).cause?.code ?? (err as { code?: unknown }).code;
+
+const attemptMayHaveSent = (fetchError: Error | null, bodyError: Error | null, status: number): boolean => {
+  if (fetchError) {
+    const code = errorCode(fetchError);
+    return !(typeof code === 'string' && NEVER_CONNECTED.has(code));
+  }
+  if (bodyError) return true;
+  return UNCERTAIN_STATUS_CODES.has(status);
+};
+
+/** Marks the error the way the core reads it (`mayHaveSent: true`), when any attempt was uncertain. */
+const markIfUncertain = <E extends Error>(err: E, uncertain: boolean): E =>
+  uncertain && Object.isExtensible(err) ? Object.assign(err, { mayHaveSent: true }) : err;
+
 function classify(
   fetchError: Error | null,
   status: number,
@@ -110,6 +145,8 @@ export class GupshupSmsProvider implements SmsProvider {
     const signal = options?.signal;
     let attempt = 0;
     let lastTransient: string | null = null;
+    // Once any attempt may have been accepted, the final error says so.
+    let uncertain = false;
     while (attempt <= this.opts.maxRetries) {
       signal?.throwIfAborted();
       const url = this.buildUrl(params);
@@ -125,6 +162,7 @@ export class GupshupSmsProvider implements SmsProvider {
         status,
         body ?? '',
       );
+      uncertain = uncertain || (outcome.kind !== 'ok' && attemptMayHaveSent(fetchErr, bodyErr, status));
 
       if (outcome.kind === 'ok') {
         return {
@@ -133,7 +171,7 @@ export class GupshupSmsProvider implements SmsProvider {
         };
       }
       if (outcome.kind === 'terminal') {
-        throw new GupshupTerminalError(outcome.message, status);
+        throw markIfUncertain(new GupshupTerminalError(outcome.message, status), uncertain);
       }
       // transient
       lastTransient = outcome.message;
@@ -141,8 +179,9 @@ export class GupshupSmsProvider implements SmsProvider {
       await this.sleep(this.opts.retryBaseMs * 2 ** attempt, signal);
       attempt++;
     }
-    throw new GupshupTransientError(
-      `Gupshup retry budget exhausted: ${lastTransient}`,
+    throw markIfUncertain(
+      new GupshupTransientError(`Gupshup retry budget exhausted: ${lastTransient}`),
+      uncertain,
     );
   }
 

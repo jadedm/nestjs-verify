@@ -16,18 +16,26 @@ const fill = (template: string, code: string) => template.replace('{{code}}', co
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * Providers often name the recipient in their errors (SES rejections list the
- * address). The error reaches logs, spans and the abuse store, so the
- * recipient is replaced with a placeholder before it leaves the deliverer.
+ * A provider marks an error `mayHaveSent: true` when its request may have
+ * been accepted before the failure (a reset after the request left, an HTTP
+ * 500, 502 or 504). Only the exact value `true` counts (#33).
  */
+export const reportsMayHaveSent = (err: unknown): boolean =>
+  (err as { mayHaveSent?: unknown } | null)?.mayHaveSent === true;
+
 // AWS SDK errors carry the request id needed for a support case here.
 const requestIdOf = (err: unknown): string | undefined => {
   const id = (err as { $metadata?: { requestId?: unknown } } | null)?.$metadata?.requestId;
   return typeof id === 'string' ? id : undefined;
 };
 
-// Promise.resolve().then() also catches a provider that throws synchronously,
-// which would otherwise skip the scrub.
+/**
+ * Providers often name the recipient in their errors (SES rejections list the
+ * address). The error reaches logs, spans and the abuse store, so the
+ * recipient is replaced with a placeholder before it leaves the deliverer.
+ * Promise.resolve().then() also catches a provider that throws synchronously,
+ * which would otherwise skip the scrub.
+ */
 const scrubbed = async <T>(to: string, send: () => Promise<T>): Promise<T> =>
   Promise.resolve()
     .then(send)
@@ -37,6 +45,8 @@ const scrubbed = async <T>(to: string, send: () => Promise<T>): Promise<T> =>
       const requestId = requestIdOf(err);
       const clean = new Error(requestId ? `${message} (request id ${requestId})` : message);
       clean.name = source.name;
+      // The rebuilt error must keep the provider's may-have-sent mark.
+      if (reportsMayHaveSent(err)) Object.assign(clean, { mayHaveSent: true });
       throw clean;
     });
 

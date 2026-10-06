@@ -202,3 +202,57 @@ describe('GupshupSmsProvider, abort (case 13)', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe('GupshupSmsProvider, may-have-sent mark (#33)', () => {
+  const send = async (fetchImpl: typeof fetch) => {
+    const p = new GupshupSmsProvider({
+      auth: { mode: 'apikey', apiKey: 'key' },
+      sender: 'JADEDM',
+      fetchImpl,
+      maxRetries: 2,
+      retryBaseMs: 1,
+    });
+    return p.send({ to: '+919999', body: 'code' }).then(
+      () => undefined,
+      (e: unknown) => e as { mayHaveSent?: unknown },
+    );
+  };
+  const fetchErr = (code: string) =>
+    (async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(code), { code }) });
+    }) as unknown as typeof fetch;
+
+  it.each([
+    [504, true],
+    [503, undefined],
+    [429, undefined],
+  ])('HTTP %s on every attempt marks %s (case 10)', async (status, mark) => {
+    const { fn } = mockFetch([{ status: status as number }]);
+    expect((await send(fn))?.mayHaveSent).toBe(mark);
+  });
+
+  it('marks a reset from fetch, not a refused connection or failed lookup (case 11)', async () => {
+    // undici reports a peer that closed mid-request as UND_ERR_SOCKET.
+    expect((await send(fetchErr('UND_ERR_SOCKET')))?.mayHaveSent).toBe(true);
+    expect((await send(fetchErr('ECONNREFUSED')))?.mayHaveSent).toBeUndefined();
+    expect((await send(fetchErr('ENOTFOUND')))?.mayHaveSent).toBeUndefined();
+  });
+
+  it('does not mark a connect timeout or an unreachable host (review)', async () => {
+    expect((await send(fetchErr('UND_ERR_CONNECT_TIMEOUT')))?.mayHaveSent).toBeUndefined();
+    expect((await send(fetchErr('EHOSTUNREACH')))?.mayHaveSent).toBeUndefined();
+  });
+
+  it('marks a failure to read the body after a response arrived (case 12)', async () => {
+    const unreadable = (async () =>
+      ({ status: 200, text: async () => { throw new Error('body stream broke'); } }) as unknown as Response) as unknown as typeof fetch;
+    expect((await send(unreadable))?.mayHaveSent).toBe(true);
+  });
+
+  it('marks a provider error only when an uncertain attempt came first (case 13)', async () => {
+    const { fn: onlyError } = mockFetch([{ body: 'error | 105 | invalid number' }]);
+    expect((await send(onlyError))?.mayHaveSent).toBeUndefined();
+    const { fn: afterTimeout } = mockFetch([{ status: 504 }, { body: 'error | 105 | invalid number' }]);
+    expect((await send(afterTimeout))?.mayHaveSent).toBe(true);
+  });
+});

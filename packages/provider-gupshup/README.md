@@ -51,6 +51,8 @@ Terminal errors (HTTP 4xx, or a Gupshup in-body `error|...` response) surface im
 
 After the retry budget is exhausted on persistent transient errors, the adapter throws `GupshupTransientError`. The verify service treats both as a failed dispatch and tries the next provider in the fallback chain if one is configured.
 
+When any attempt may have been accepted by Gupshup (HTTP 500, 502 or 504, a network error other than those listed below, or a response whose body could not be read), the thrown error carries `mayHaveSent: true`, even if a later attempt failed cleanly. `@jadedm/nestjs-verify` then starts the recipient's cooldown so an immediate retry does not send a second message. A refused connection, a DNS failure, an unreachable host or network, 429 and 503 are not marked; any other network error is marked, which errs toward a cooldown. The adapter's own retries still run after an uncertain attempt and can deliver the same code again (#43).
+
 ## Fallback chain
 
 Pair with another provider for resilience:
