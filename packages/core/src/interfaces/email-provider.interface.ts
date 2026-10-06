@@ -1,3 +1,5 @@
+import type { ProviderSendOptions } from './sms-provider.interface.js';
+
 export interface EmailSendParams {
   to: string;
   subject: string;
@@ -12,5 +14,5 @@ export interface EmailSendResult {
 export interface EmailProvider {
   /** Stable identifier, e.g. 'ses'. Used in logs, audit and metrics. */
   readonly name: string;
-  send(params: EmailSendParams): Promise<EmailSendResult>;
+  send(params: EmailSendParams, options?: ProviderSendOptions): Promise<EmailSendResult>;
 }

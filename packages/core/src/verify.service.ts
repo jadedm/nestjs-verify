@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { VERIFY_MODULE_OPTIONS } from './interfaces/module-options.interface.js';
 import type { VerifyModuleOptions } from './interfaces/module-options.interface.js';
 import { asyncHandler } from './utils/async-handler.js';
+import { DeliveryTimeoutError, withDeadline } from './utils/deadline.js';
 import { withSpan } from './tracing/tracer.js';
 import { TELEMETRY, BLOCK_REASON, CHECK_OUTCOME, SMS_OUTCOME } from './constants.js';
 import {
@@ -76,19 +77,32 @@ const DEFAULTS = {
   perIp: { count: 20, windowSeconds: 3600 },
   maxDistinctPhonesPerIp: 10,
   velocityWindowSeconds: 300,
+  attemptTimeoutMs: 5000,
+  totalTimeoutMs: 10000,
 } as const;
+
+const isPositiveMs = (ms: number) => Number.isFinite(ms) && ms > 0;
 
 @Injectable()
 export class VerifyService {
   private readonly log = new Logger(VerifyService.name);
   private readonly metrics: MetricsRecorder;
   private readonly deliverers: Map<DeliveryKind, Deliverer[]>;
+  private readonly attemptTimeoutMs: number;
+  private readonly totalTimeoutMs: number;
 
   constructor(
     @Inject(VERIFY_MODULE_OPTIONS)
     private readonly options: VerifyModuleOptions,
   ) {
     this.deliverers = buildDeliverers(options);
+    this.attemptTimeoutMs = options.delivery?.attemptTimeoutMs ?? DEFAULTS.attemptTimeoutMs;
+    this.totalTimeoutMs = options.delivery?.totalTimeoutMs ?? DEFAULTS.totalTimeoutMs;
+    if (!isPositiveMs(this.attemptTimeoutMs) || !isPositiveMs(this.totalTimeoutMs)) {
+      throw new Error(
+        'delivery.attemptTimeoutMs and delivery.totalTimeoutMs must be positive, finite numbers of milliseconds.',
+      );
+    }
     this.metrics = createMetricsRecorder({
       enabled: options.observability?.metrics?.enabled,
       registry: options.observability?.metrics?.registry,
@@ -372,11 +386,25 @@ export class VerifyService {
     return { sid, state: 'pending', attemptsRemaining };
   }
 
-  /** Tries each provider for the recipient's kind in order; returns the one that sent. */
+  /**
+   * Tries each provider for the recipient's kind in order; returns the one that
+   * sent. Each attempt is limited to `attemptTimeoutMs` and the whole chain to
+   * `totalTimeoutMs`; once the total is spent, no further provider is tried.
+   */
   private async sendCode(recipient: Recipient, code: string): Promise<string> {
     const serviceName = this.options.observability?.tracing?.serviceName;
+    const chainStart = Date.now();
     let lastError: unknown;
     for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
+      const remainingMs = this.totalTimeoutMs - (Date.now() - chainStart);
+      if (remainingMs <= 0) {
+        lastError = new DeliveryTimeoutError(
+          `delivery limit of ${this.totalTimeoutMs} ms reached before ${deliverer.name} was tried`,
+        );
+        this.log.warn(`provider ${deliverer.name} skipped for ${this.redact(recipient.key)}: total delivery limit reached`);
+        break;
+      }
+      const limitMs = Math.min(this.attemptTimeoutMs, remainingMs);
       const sendStart = Date.now();
       const [, err] = await asyncHandler(
         withSpan(
@@ -388,7 +416,7 @@ export class VerifyService {
               [TELEMETRY.ATTR_CHANNEL]: recipient.kind,
             },
           },
-          () => deliverer.deliver(recipient.address, code),
+          () => withDeadline(limitMs, (signal) => deliverer.deliver(recipient.address, code, signal)),
           serviceName,
         ),
       );

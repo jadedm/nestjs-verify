@@ -89,6 +89,18 @@ export interface VerifyModuleOptions {
     /** Cooldown after a send before allowing another. Default 30s. */
     cooldownSeconds?: number;
   };
+  /**
+   * How long a send may take. An attempt that runs past its limit counts as a
+   * failure and the next provider in the chain is tried; its signal is
+   * aborted. A request already in flight may still deliver, so a fallback can
+   * send a second message carrying the same code.
+   */
+  delivery?: {
+    /** Limit for one provider attempt, in ms. Default 5000. */
+    attemptTimeoutMs?: number;
+    /** Limit for the whole provider chain, in ms. Default 10000. */
+    totalTimeoutMs?: number;
+  };
   rateLimit?: {
     perPhone?: RateLimitPolicy;
     perIp?: RateLimitPolicy;

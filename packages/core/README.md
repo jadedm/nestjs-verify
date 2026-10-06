@@ -74,6 +74,7 @@ VerifyModule.forRootAsync({
     },
     code:       { length: 6, ttlSeconds: 600, fixedCode: undefined },
     attempts:   { max: 5, cooldownSeconds: 30 },
+    delivery:   { attemptTimeoutMs: 5000, totalTimeoutMs: 10000 },
     rateLimit:  { perPhone: { count: 5, windowSeconds: 3600 } },
     abuse:      { maxDistinctPhonesPerIp: 10, velocityWindowSeconds: 300 },
     messageTemplate: 'Your code is {{code}}',
@@ -82,6 +83,8 @@ VerifyModule.forRootAsync({
   }),
 })
 ```
+
+`delivery` bounds how long `POST /verify/start` waits on providers. An attempt that runs past `attemptTimeoutMs` counts as a failure and the next provider in `fallbacks` is tried; once `totalTimeoutMs` is spent, no further provider is tried and the request fails with 503 `SMS_DISPATCH_FAILED`. Each attempt's `send` gets an `AbortSignal` that fires at its limit. A request already in flight may still deliver, so a fallback can send a second message carrying the same code.
 
 ## The five stores
 
