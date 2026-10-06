@@ -81,7 +81,10 @@ const DEFAULTS = {
   totalTimeoutMs: 10000,
 } as const;
 
-const isPositiveMs = (ms: number) => Number.isFinite(ms) && ms > 0;
+// setTimeout treats a delay above 2^31-1 ms as 1 ms, so a larger limit would
+// time every attempt out at once.
+const MAX_TIMER_MS = 2_147_483_647;
+const isValidLimitMs = (ms: number) => Number.isFinite(ms) && ms > 0 && ms <= MAX_TIMER_MS;
 
 @Injectable()
 export class VerifyService {
@@ -98,9 +101,9 @@ export class VerifyService {
     this.deliverers = buildDeliverers(options);
     this.attemptTimeoutMs = options.delivery?.attemptTimeoutMs ?? DEFAULTS.attemptTimeoutMs;
     this.totalTimeoutMs = options.delivery?.totalTimeoutMs ?? DEFAULTS.totalTimeoutMs;
-    if (!isPositiveMs(this.attemptTimeoutMs) || !isPositiveMs(this.totalTimeoutMs)) {
+    if (!isValidLimitMs(this.attemptTimeoutMs) || !isValidLimitMs(this.totalTimeoutMs)) {
       throw new Error(
-        'delivery.attemptTimeoutMs and delivery.totalTimeoutMs must be positive, finite numbers of milliseconds.',
+        `delivery.attemptTimeoutMs and delivery.totalTimeoutMs must be positive, finite numbers of milliseconds, at most ${MAX_TIMER_MS}.`,
       );
     }
     this.metrics = createMetricsRecorder({
@@ -393,10 +396,11 @@ export class VerifyService {
    */
   private async sendCode(recipient: Recipient, code: string): Promise<string> {
     const serviceName = this.options.observability?.tracing?.serviceName;
-    const chainStart = Date.now();
+    // Monotonic, so a wall-clock step cannot stretch or shrink the budget.
+    const chainStart = performance.now();
     let lastError: unknown;
     for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
-      const remainingMs = this.totalTimeoutMs - (Date.now() - chainStart);
+      const remainingMs = this.totalTimeoutMs - (performance.now() - chainStart);
       if (remainingMs <= 0) {
         lastError = new DeliveryTimeoutError(
           `delivery limit of ${this.totalTimeoutMs} ms reached before ${deliverer.name} was tried`,

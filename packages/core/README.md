@@ -84,7 +84,7 @@ VerifyModule.forRootAsync({
 })
 ```
 
-`delivery` bounds how long `POST /verify/start` waits on providers. An attempt that runs past `attemptTimeoutMs` counts as a failure and the next provider in `fallbacks` is tried; once `totalTimeoutMs` is spent, no further provider is tried and the request fails with 503 `SMS_DISPATCH_FAILED`. Each attempt's `send` gets an `AbortSignal` that fires at its limit. A request already in flight may still deliver, so a fallback can send a second message carrying the same code.
+`delivery` bounds how long `POST /verify/start` waits on providers. An attempt that runs past `attemptTimeoutMs` counts as a failure and the next provider in `fallbacks` is tried; once `totalTimeoutMs` is spent, no further provider is tried and the request fails with 503 `SMS_DISPATCH_FAILED`. Each attempt's `send` gets an `AbortSignal` that fires at its limit. A request already in flight may still deliver: a fallback can then send a second message carrying the same code, and when every attempt times out, the 503 may follow a message that did arrive. Limits above 2147483647 ms are refused, because Node's timers cannot represent them.
 
 ## The five stores
 

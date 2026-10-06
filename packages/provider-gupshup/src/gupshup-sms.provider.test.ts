@@ -186,9 +186,19 @@ describe('GupshupSmsProvider, abort (case 13)', () => {
     });
     const controller = new AbortController();
     setTimeout(() => controller.abort(new Error('core gave up')), 10);
+    const started = Date.now();
     await expect(p.send({ to: '+919999', body: 'code' }, { signal: controller.signal })).rejects.toThrow('core gave up');
+    // The first backoff wait is 50 ms; ending it on abort answers well before.
+    expect(Date.now() - started).toBeLessThan(45);
     await new Promise((r) => setTimeout(r, 300));
     expect(fn).toHaveBeenCalledTimes(1);
     expect(signals[0]).toBe(controller.signal);
+  });
+
+  it('does not call fetch when the signal is already aborted', async () => {
+    const fn = vi.fn(async () => new Response('success | sent | 1', { status: 200 })) as unknown as typeof fetch;
+    const p = new GupshupSmsProvider({ auth: { mode: 'apikey', apiKey: 'key' }, sender: 'JADEDM', fetchImpl: fn });
+    await expect(p.send({ to: '+919999', body: 'code' }, { signal: AbortSignal.abort(new Error('late')) })).rejects.toThrow('late');
+    expect(fn).not.toHaveBeenCalled();
   });
 });

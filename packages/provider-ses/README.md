@@ -39,5 +39,5 @@ Node 20 or newer: current `@aws-sdk/client-sesv2` releases require it, though th
 
 ## Peers
 
-- `@jadedm/nestjs-verify` ^0.6.0 (the same minor version; the packages are released together)
+- `@jadedm/nestjs-verify` 0.6.x, at least the version released alongside this one (see `peerDependencies`)
 - `@aws-sdk/client-sesv2` 3.x

@@ -110,7 +110,7 @@ describe('VerifyService, delivery limits', () => {
     expect(unhandled).not.toHaveBeenCalled();
   });
 
-  it('ignores an abandoned attempt that succeeds later (case 5)', async () => {
+  it('keeps the fallback outcome when an abandoned attempt succeeds later (case 5)', async () => {
     const primary = provider('late-ok', () => after(60));
     const backup = provider('backup', ok);
     const service = build({ provider: primary.p, fallbacks: [backup.p] }, { attemptTimeoutMs: 20 });
@@ -132,7 +132,9 @@ describe('VerifyService, delivery limits', () => {
   });
 
   it('applies 5000 ms per attempt and 10000 ms in total by default (case 8)', async () => {
-    vi.useFakeTimers();
+    // The chain budget is measured with performance.now(), which vitest only
+    // fakes when asked.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
     const chain = ['a', 'b', 'c'].map((n) => provider(n, never));
     const service = build({ provider: chain[0].p, fallbacks: [chain[1].p, chain[2].p] });
     const outcome = service.start({ to: PHONE }).then(
@@ -148,10 +150,27 @@ describe('VerifyService, delivery limits', () => {
     expect(chain[2].p.send).not.toHaveBeenCalled();
   });
 
-  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('refuses a limit of %s (case 9)', (bad) => {
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, Number.MAX_SAFE_INTEGER])(
+    'refuses a limit of %s (case 9)',
+    (bad) => {
+      const only = provider('x', ok);
+      expect(() => build({ provider: only.p }, { attemptTimeoutMs: bad })).toThrow(/positive, finite/);
+      expect(() => build({ provider: only.p }, { totalTimeoutMs: bad })).toThrow(/positive, finite/);
+    },
+  );
+
+  it('accepts the largest limit Node can time, and still sends (case 9b)', async () => {
     const only = provider('x', ok);
-    expect(() => build({ provider: only.p }, { attemptTimeoutMs: bad })).toThrow(/positive, finite/);
-    expect(() => build({ provider: only.p }, { totalTimeoutMs: bad })).toThrow(/positive, finite/);
+    const service = build({ provider: only.p }, { attemptTimeoutMs: 2_147_483_647, totalTimeoutMs: 2_147_483_647 });
+    expect((await service.start({ to: PHONE })).state).toBe('pending');
+  });
+
+  it('gives an attempt only the time left in the total (case 1c)', async () => {
+    const only = provider('stuck', never);
+    const service = build({ provider: only.p }, { attemptTimeoutMs: 400, totalTimeoutMs: 40 });
+    const started = Date.now();
+    expect(await errorCode(service.start({ to: PHONE }))).toBe(VerifyErrorCode.SmsDispatchFailed);
+    expect(Date.now() - started).toBeLessThan(200);
   });
 
   it('leaves no timer pending after a successful send (case 10)', async () => {
