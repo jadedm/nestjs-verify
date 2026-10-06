@@ -1,11 +1,22 @@
 # @jadedm/nestjs-verify
 
+## 0.6.2
+
+### Patch Changes
+
+- eb3a762: Provider sends now have time limits. Before, a provider that never answered held `POST /verify/start` open indefinitely and the fallbacks were never tried.
+
+  - New `delivery` option: `attemptTimeoutMs` (default 5000) limits one provider attempt, and `totalTimeoutMs` (default 10000) limits the whole chain. An attempt past its limit counts as a failure and the next provider is tried; when the total is spent the request fails with 503 `SMS_DISPATCH_FAILED`. Invalid values fail at startup.
+  - Providers receive an `AbortSignal` as an optional second argument to `send`, aborted at the attempt's limit. SES passes it to the AWS SDK, Gupshup to `fetch`; Twilio and Gupshup stop retrying once it aborts. A custom provider whose `send` takes one argument needs no change. One whose `send` already takes a second parameter of its own must rename or move it: TypeScript reports TS2416, and in JavaScript that parameter now receives `{ signal }`.
+  - A request already in flight may still deliver after its limit. A fallback can then send a second message carrying the same code, and when every attempt times out the 503 may follow a message that did arrive, carrying a code for a verification that was removed.
+  - Logged provider errors keep the AWS request id.
+
 ## 0.6.0
 
 ### Minor Changes
 
 - **Security fix (GHSA-qm9j-mc5v-33p5):** `check()` answered `approved` for a verification that was already approved, without comparing the submitted code. A finished verification now answers `canceled`; only the call that approves reports `approved`. If removing the recipient index fails after an approval, the approving call still answers `approved` and the failure is logged. Upgrade from 0.5.0 and earlier.
-Email channel and an Amazon SES provider.
+  Email channel and an Amazon SES provider.
 
 - New `email` module option (`provider`, `fallbacks`, `subject`, `template`) and an `EmailProvider` interface, plus `MockEmailProvider` for development and tests. `sms` is now optional; at least one of `sms` or `email` must be configured.
 - Start a verification with `channel: 'email'` and an email address in `to`. `check` takes the address as before. The whole address is lowercased for cooldowns, rate limits and lookup, so case variants of one mailbox share them; the code is sent to the address as given. Addresses with display-name or list characters (`<>()[],;:"\`) are rejected.
@@ -35,12 +46,14 @@ Email channel and an Amazon SES provider.
 - `stores.audit` is optional; if absent, no events emit and no overhead is incurred. Sink failures are caught and logged at WARN level so a flaky sink never breaks a verification.
 
 - OpenTelemetry tracing, auto-detect.
+
   - `@opentelemetry/api` is now a required peer dep (~3kb, no-op tracer at runtime if no SDK registered).
   - Spans at `verify.start`, `verify.check`, `verify.send_code` with attributes (`verify.phone_redacted`, `verify.channel`, `verify.sid`, `verify.provider`, `http.client_ip`). Exceptions recorded on the span, status set appropriately.
   - Service name configurable via `observability.tracing.serviceName`. Default tracker version auto-synced to the package version via a tsup build-time define.
   - All span names and attribute keys live in a `TELEMETRY` constants module for easy override.
 
 - Prometheus metrics, opt-in.
+
   - `prom-client` is an optional peer dep. Required only when `observability.metrics.enabled: true`.
   - Metrics: `verify_starts_total`, `verify_starts_blocked_total{reason}`, `verify_checks_total{outcome}`, `verify_phone_rate_limit_hits_total`, histograms `verify_sms_send_duration_seconds{provider,outcome}` and `verify_check_duration_seconds`.
   - `VerifyService.getMetricsRegistry()` returns the prom-client Registry so adopters can wire it to their own `/metrics` controller.
@@ -56,15 +69,18 @@ Email channel and an Amazon SES provider.
 - DX hardening release. No breaking changes from 0.3.0 on the wire or in the store interfaces.
 
 - DTO validation:
+
   - `StartVerificationDto` and `CheckVerificationDto` now carry `class-validator` decorators. Wire `app.useGlobalPipes(new ValidationPipe({ transform: true }))` to surface validation errors with descriptive messages.
   - Service-layer phone regex check still runs as a safety net.
 
 - OpenAPI / Swagger:
+
   - Added `@nestjs/swagger` as a peer dep.
   - New `VerifySwagger` const exported from core, following a per-feature `controllers/swagger/*.swagger.ts` convention. The built-in controller applies these decorators inline so adopters get a fully-documented `/verify/start` and `/verify/check` route in their Swagger UI for free.
   - DTOs carry `@ApiProperty` so the Swagger schemas render the right examples.
 
 - Structured error catalog:
+
   - New `VerifyErrorCode` enum exports stable string codes (`COOLDOWN_ACTIVE`, `PHONE_RATE_LIMITED`, etc.). Clients can branch on `code` instead of message strings.
   - New `VerifyException` base class plus per-error subclasses (`InvalidPhoneException`, `CooldownActiveException`, `PhoneRateLimitedException`, `IpRateLimitedException`, `AbuseVelocityException`, `SmsDispatchFailedException`, `NoPendingVerificationException`, `CodeExpiredException`). Catch the base to handle all verify errors uniformly in a global filter.
 
