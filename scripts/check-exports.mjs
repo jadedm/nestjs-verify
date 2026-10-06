@@ -36,16 +36,25 @@ const entriesOf = (dir) => {
 // Each prints the number of exports it got as its last stdout line. The child
 // is left to exit on its own, so an error thrown after load still fails it; a
 // module that keeps the process alive fails on the timeout instead of hanging.
+// A load error is caught in the child and printed after MARKER, so the report
+// names the error itself rather than whatever else reached stderr.
+const MARKER = 'check-exports-load-error:';
+const describe = `const describe = (e) => e instanceof Error ? e.name + ': ' + e.message : (typeof e === 'string' ? e : JSON.stringify(e) ?? String(e));`;
+const fail = `process.stderr.write(${JSON.stringify(MARKER)} + ' ' + describe(e).split('\\n')[0] + '\\n'); process.exit(1);`;
 const loaders = {
-  esm: (name) => ['--input-type=module', '-e', `const m = await import(${JSON.stringify(name)}); console.log(Object.keys(m).length)`],
-  cjs: (name) => ['-e', `console.log(Object.keys(require(${JSON.stringify(name)})).length)`],
+  esm: (name) => ['--input-type=module', '-e', `${describe} try { const m = await import(${JSON.stringify(name)}); console.log(Object.keys(m).length) } catch (e) { ${fail} }`],
+  cjs: (name) => ['-e', `${describe} try { console.log(Object.keys(require(${JSON.stringify(name)})).length) } catch (e) { ${fail} }`],
 };
 const LOAD_TIMEOUT_MS = 30_000;
 
-// Node prints the source line and a caret before the error itself.
-const firstError = (stderr) =>
-  stderr.split('\n').find((l) => /^\s*\w*(Error|Exception)\b.*:/.test(l))?.trim() ??
-  stderr.trim().split('\n').at(-1);
+// An error thrown after load is not caught by the loader; Node then prints the
+// source line, a caret, the error, and a closing "Node.js vX" banner.
+const errorFrom = (stderr) => {
+  const lines = stderr.split('\n').map((l) => l.trim()).filter((l) => l && !/^Node\.js v/.test(l));
+  const marked = lines.find((l) => l.startsWith(MARKER));
+  if (marked) return marked.slice(MARKER.length).trim();
+  return lines.findLast((l) => /^(Uncaught )?\w*(Error|Exception)\b.*:/.test(l)) ?? lines.at(-1) ?? '(no error output)';
+};
 
 const exportCount = (stdout) => Number(stdout.trim().split('\n').at(-1));
 
@@ -56,9 +65,13 @@ const check = (dir, kind, name, entry) => {
     cwd: dir,
     encoding: 'utf8',
     timeout: LOAD_TIMEOUT_MS,
+    // SIGTERM can be caught by the module under test; SIGKILL cannot.
+    killSignal: 'SIGKILL',
   });
   if (run.error?.code === 'ETIMEDOUT') return `${kind}: load did not finish within ${LOAD_TIMEOUT_MS} ms`;
-  if (run.status !== 0) return `${kind}: ${firstError(run.stderr)}`;
+  if (run.error) return `${kind}: could not run the load (${run.error.code ?? run.error.message})`;
+  if (run.signal) return `${kind}: load killed by ${run.signal}`;
+  if (run.status !== 0) return `${kind}: ${errorFrom(run.stderr ?? '')}`;
   if (!(exportCount(run.stdout) > 0)) return `${kind}: loaded with no exports`;
   return null;
 };
