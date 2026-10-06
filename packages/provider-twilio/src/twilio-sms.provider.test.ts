@@ -145,6 +145,23 @@ describe('TwilioSmsProvider, may-have-sent mark (#33)', () => {
     expect(err?.mayHaveSent).toBe(true);
   });
 
+  it('marks a response that broke after a 200 header (axios ERR_BAD_RESPONSE, review)', async () => {
+    const broken = Object.assign(new Error('stream broke'), { name: 'AxiosError', code: 'ERR_BAD_RESPONSE', status: 200 });
+    expect((await thrown(failWith(broken)))?.mayHaveSent).toBe(true);
+  });
+
+  it('does not mark an unreachable host or network (review)', async () => {
+    expect((await thrown(failWith(netErr('EHOSTUNREACH'))))?.mayHaveSent).toBeUndefined();
+    expect((await thrown(failWith(netErr('ENETUNREACH'))))?.mayHaveSent).toBeUndefined();
+  });
+
+  it('leaves a frozen error alone instead of throwing while marking it (review)', async () => {
+    const frozen = Object.freeze(Object.assign(new Error('HTTP 504'), { status: 504 }));
+    const err = await thrown(failWith(frozen));
+    expect(err).toBe(frozen);
+    expect(err?.mayHaveSent).toBeUndefined();
+  });
+
   it('does not mark a 400 on its own (case 9)', async () => {
     expect((await thrown(failWith(httpErr(400))))?.mayHaveSent).toBeUndefined();
   });

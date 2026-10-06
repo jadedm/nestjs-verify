@@ -16,11 +16,6 @@ const fill = (template: string, code: string) => template.replace('{{code}}', co
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * Providers often name the recipient in their errors (SES rejections list the
- * address). The error reaches logs, spans and the abuse store, so the
- * recipient is replaced with a placeholder before it leaves the deliverer.
- */
-/**
  * A provider marks an error `mayHaveSent: true` when its request may have
  * been accepted before the failure (a reset after the request left, an HTTP
  * 500, 502 or 504). Only the exact value `true` counts (#33).
@@ -34,8 +29,13 @@ const requestIdOf = (err: unknown): string | undefined => {
   return typeof id === 'string' ? id : undefined;
 };
 
-// Promise.resolve().then() also catches a provider that throws synchronously,
-// which would otherwise skip the scrub.
+/**
+ * Providers often name the recipient in their errors (SES rejections list the
+ * address). The error reaches logs, spans and the abuse store, so the
+ * recipient is replaced with a placeholder before it leaves the deliverer.
+ * Promise.resolve().then() also catches a provider that throws synchronously,
+ * which would otherwise skip the scrub.
+ */
 const scrubbed = async <T>(to: string, send: () => Promise<T>): Promise<T> =>
   Promise.resolve()
     .then(send)

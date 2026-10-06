@@ -33,17 +33,21 @@ const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
  * written, unless the connection was never made.
  */
 const UNCERTAIN_STATUS_CODES = new Set([500, 502, 504]);
-const NEVER_CONNECTED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+const NEVER_CONNECTED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH']);
 
 const mayHaveBeenAccepted = (err: unknown): boolean => {
   const { status, code } = (err ?? {}) as { status?: unknown; code?: unknown };
+  // axios 1.7.5+ reports a response that broke after its headers as
+  // ERR_BAD_RESPONSE with that response's status, often 200: Twilio may have
+  // queued the message.
+  if (code === 'ERR_BAD_RESPONSE') return true;
   if (typeof status === 'number') return UNCERTAIN_STATUS_CODES.has(status);
   return !(typeof code === 'string' && NEVER_CONNECTED.has(code));
 };
 
 /** Marks the error the way the core reads it (`mayHaveSent: true`), when any attempt was uncertain. */
 const markIfUncertain = (err: unknown, uncertain: boolean): unknown => {
-  if (!uncertain || typeof err !== 'object' || err === null) return err;
+  if (!uncertain || typeof err !== 'object' || err === null || !Object.isExtensible(err)) return err;
   return Object.assign(err, { mayHaveSent: true });
 };
 

@@ -226,16 +226,17 @@ export class VerifyService {
       channel,
     });
     // A failed start removes the verification and answers 503. When a message
-    // may have gone out (an attempt timed out, or the send succeeded and the
-    // bookkeeping after it failed), the cooldown is started first, before any
+    // may have gone out (an attempt timed out, a provider marked its error
+    // mayHaveSent, or the send succeeded and the bookkeeping after it failed),
+    // the cooldown is started first, before any
     // cleanup that can itself fail, so an immediate retry cannot send again
     // (#28). A retry after a definite send can still deliver a second code;
     // only the per-recipient rate limit counts it.
     const fail = (err: Error, mayHaveSent: boolean) =>
       this.failStart({ sid, phone, ip: params.ip, channel, cooldownSeconds, kind: recipient.kind }, err, mayHaveSent);
     const [provider, sendErr] = await asyncHandler(this.sendCode(recipient, code));
-    // Only a chain failure where no attempt timed out is known not to have
-    // sent; anything else (an error after a successful attempt) may have.
+    // Only a chain failure with no timed-out or marked attempt is known not to
+    // have sent; anything else (an error after a successful attempt) may have.
     if (sendErr) throw await fail(sendErr, !(sendErr instanceof DeliveryChainError) || sendErr.mayHaveSent);
     const [, bookkeepingErr] = await asyncHandler(
       this.recordSent({ sid, phone, ip: params.ip, channel, cooldownSeconds, provider }),

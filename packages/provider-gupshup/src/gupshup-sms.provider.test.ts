@@ -232,9 +232,15 @@ describe('GupshupSmsProvider, may-have-sent mark (#33)', () => {
   });
 
   it('marks a reset from fetch, not a refused connection or failed lookup (case 11)', async () => {
-    expect((await send(fetchErr('ECONNRESET')))?.mayHaveSent).toBe(true);
+    // undici reports a peer that closed mid-request as UND_ERR_SOCKET.
+    expect((await send(fetchErr('UND_ERR_SOCKET')))?.mayHaveSent).toBe(true);
     expect((await send(fetchErr('ECONNREFUSED')))?.mayHaveSent).toBeUndefined();
     expect((await send(fetchErr('ENOTFOUND')))?.mayHaveSent).toBeUndefined();
+  });
+
+  it('does not mark a connect timeout or an unreachable host (review)', async () => {
+    expect((await send(fetchErr('UND_ERR_CONNECT_TIMEOUT')))?.mayHaveSent).toBeUndefined();
+    expect((await send(fetchErr('EHOSTUNREACH')))?.mayHaveSent).toBeUndefined();
   });
 
   it('marks a failure to read the body after a response arrived (case 12)', async () => {

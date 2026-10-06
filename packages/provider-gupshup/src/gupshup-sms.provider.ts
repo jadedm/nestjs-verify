@@ -65,7 +65,16 @@ const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
  * connection or failed DNS lookup never reached Gupshup.
  */
 const UNCERTAIN_STATUS_CODES = new Set([500, 502, 504]);
-const NEVER_CONNECTED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+// A connect timeout (UND_ERR_CONNECT_TIMEOUT from undici) never finished the
+// handshake, so the request cannot have reached Gupshup.
+const NEVER_CONNECTED = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
 
 // fetch (undici) puts the system error code on `cause`.
 const errorCode = (err: Error): unknown =>
@@ -82,7 +91,7 @@ const attemptMayHaveSent = (fetchError: Error | null, bodyError: Error | null, s
 
 /** Marks the error the way the core reads it (`mayHaveSent: true`), when any attempt was uncertain. */
 const markIfUncertain = <E extends Error>(err: E, uncertain: boolean): E =>
-  uncertain ? Object.assign(err, { mayHaveSent: true }) : err;
+  uncertain && Object.isExtensible(err) ? Object.assign(err, { mayHaveSent: true }) : err;
 
 function classify(
   fetchError: Error | null,
