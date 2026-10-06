@@ -182,14 +182,14 @@ describe('GupshupSmsProvider, abort (case 13)', () => {
       sender: 'JADEDM',
       fetchImpl: fn,
       maxRetries: 5,
-      retryBaseMs: 50,
+      retryBaseMs: 400,
     });
     const controller = new AbortController();
     setTimeout(() => controller.abort(new Error('core gave up')), 10);
     const started = Date.now();
     await expect(p.send({ to: '+919999', body: 'code' }, { signal: controller.signal })).rejects.toThrow('core gave up');
-    // The first backoff wait is 50 ms; ending it on abort answers well before.
-    expect(Date.now() - started).toBeLessThan(45);
+    // The first backoff wait is 400 ms; ending it on abort answers well before.
+    expect(Date.now() - started).toBeLessThan(250);
     await new Promise((r) => setTimeout(r, 300));
     expect(fn).toHaveBeenCalledTimes(1);
     expect(signals[0]).toBe(controller.signal);

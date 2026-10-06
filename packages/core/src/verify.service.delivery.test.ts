@@ -160,7 +160,8 @@ describe('VerifyService, delivery limits', () => {
   );
 
   it('accepts the largest limit Node can time, and still sends (case 9b)', async () => {
-    const only = provider('x', ok);
+    // Answers after 30 ms: an overflowed timer (treated as 1 ms) would fire first.
+    const only = provider('x', () => after(30));
     const service = build({ provider: only.p }, { attemptTimeoutMs: 2_147_483_647, totalTimeoutMs: 2_147_483_647 });
     expect((await service.start({ to: PHONE })).state).toBe('pending');
   });
