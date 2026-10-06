@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "description": "Self-hosted Twilio Verify-style OTP for NestJS. Bring your own SMS or email provider and store.",
   "keywords": [
     "nestjs",
@@ -56,7 +56,9 @@
     "rxjs": "^7.0.0"
   },
   "peerDependenciesMeta": {
-    "prom-client": { "optional": true }
+    "prom-client": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@nestjs/common": "^10.3.0",
