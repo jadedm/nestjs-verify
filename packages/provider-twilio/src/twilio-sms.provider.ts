@@ -3,7 +3,11 @@ import type {
   SmsSendParams,
   SmsSendResult,
 } from '@jadedm/nestjs-verify';
-import { Twilio } from 'twilio';
+import type { Twilio } from 'twilio';
+// twilio is CommonJS without an __esModule flag, so Node's ESM loader exposes
+// only its default export. A named `import { Twilio }` loads under vitest and in
+// the CommonJS build but fails for ESM consumers (#21).
+import twilio from 'twilio';
 
 export interface TwilioSmsProviderOptions {
   accountSid: string;
@@ -30,7 +34,7 @@ export class TwilioSmsProvider implements SmsProvider {
   private readonly retryBaseMs: number;
 
   constructor(opts: TwilioSmsProviderOptions) {
-    this.client = new Twilio(opts.accountSid, opts.authToken);
+    this.client = new twilio.Twilio(opts.accountSid, opts.authToken);
     this.from = opts.from;
     this.maxRetries = opts.maxRetries ?? 2;
     this.retryBaseMs = opts.retryBaseMs ?? 250;
