@@ -9,11 +9,16 @@ import { execFileSync } from 'node:child_process';
 
 const MIN = { npm: '11.5.1', node: '22.14.0' };
 
-const parse = (v) => v.trim().replace(/^v/, '').split('.').map((n) => Number.parseInt(n, 10));
+// A version that is not plain MAJOR.MINOR.PATCH (a pre-release such as
+// 11.5.1-pre.1, or anything unparsable) never passes.
+const RELEASE = /^v?(\d+)\.(\d+)\.(\d+)$/;
 const atLeast = (have, want) => {
-  const [a, b] = [parse(have), parse(want)];
-  for (let i = 0; i < 3; i += 1) {
-    if (a[i] !== b[i]) return a[i] > b[i];
+  const a = RELEASE.exec(have.trim());
+  const b = RELEASE.exec(want);
+  if (!a || !b) return false;
+  for (let i = 1; i <= 3; i += 1) {
+    const [x, y] = [Number(a[i]), Number(b[i])];
+    if (x !== y) return x > y;
   }
   return true;
 };

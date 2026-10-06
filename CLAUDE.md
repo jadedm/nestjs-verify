@@ -116,13 +116,14 @@ behaviour) needs a `pnpm changeset` file; internal-only changes do not. Pre-1.0,
 breaking.
 
 Release path, `.github/workflows/release.yml`, on every push to `main`:
-- With pending changesets, `changesets/action` opens or updates a "Version Packages" PR (Actions is
-  allowed to create PRs in this repo).
+- With pending changesets, `changesets/action` runs `pnpm changeset version` and opens or updates a
+  "Version Packages" PR (Actions is allowed to create PRs in this repo since 6 Oct 2026). Before #19
+  the step ran `pnpm version`, which pnpm passes to `npm version` and which changes nothing.
 - With none, it publishes every package whose local version is not on npm, through npm trusted
   publishing (OIDC, no token). The job upgrades npm to 11 and `scripts/check-publish-env.mjs` fails
-  the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 failed with
-  E404: the job ran npm 10, which cannot publish with OIDC, and no trusted publishers were set up.
-  It also runs `check:exports` before publishing.
+  the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 that tried to
+  publish failed with E404: the job ran npm 10, which cannot publish with OIDC. It publishes with
+  `pnpm changeset publish`, after `check:exports` has loaded that same build.
 - Each package needs a trusted publisher on npmjs.com (owner step, per package). Until a CI publish
   has gone through, #19 stays open.
 
