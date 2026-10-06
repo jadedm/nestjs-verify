@@ -11,9 +11,9 @@ const CONTROLLER_SETTING_CHECK = Symbol('VERIFY_CONTROLLER_SETTING_CHECK');
 
 /**
  * The controller list is fixed when the module is defined, before an async
- * factory runs, so a `registerController` in the factory's result cannot take
- * effect. When it asks for no controller and one was mounted, say so at
- * startup instead of leaving the routes exposed silently (#18).
+ * factory runs, so a `registerController: false` in the factory's result
+ * cannot keep the controller out. The controller then answers 404 itself;
+ * this logs at startup where to move the setting (#18).
  */
 const controllerSettingCheck = (mounted: boolean): Provider => ({
   provide: CONTROLLER_SETTING_CHECK,
@@ -21,8 +21,8 @@ const controllerSettingCheck = (mounted: boolean): Provider => ({
   useFactory: (options: VerifyModuleOptions) => {
     if (!mounted || options.registerController !== false) return true;
     new Logger('VerifyModule').error(
-      'registerController: false was returned from forRootAsync useFactory, where it cannot take effect: ' +
-        'POST /verify/start and /verify/check are still mounted. Set registerController on the forRootAsync options instead.',
+      'registerController: false was returned from forRootAsync useFactory, where it cannot keep the controller out: ' +
+        'it is registered and answers 404 on every request. Set registerController on the forRootAsync options instead.',
     );
     return false;
   },

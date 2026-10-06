@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VerifyModule } from './verify.module.js';
@@ -58,6 +58,43 @@ describe('VerifyModule controller registration (#18)', () => {
     );
     await app.close();
     expect(error.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('registerController'))).toEqual([]);
+  });
+
+  it('registers no controller in the running app when the async option is false (case 1b)', async () => {
+    const off = await boot(VerifyModule.forRootAsync({ registerController: false, useFactory: () => options() }));
+    expect(() => off.get(VerifyController, { strict: false })).toThrow();
+    await off.close();
+    const on = await boot(VerifyModule.forRootAsync({ useFactory: () => options() }));
+    expect(on.get(VerifyController, { strict: false })).toBeInstanceOf(VerifyController);
+    await on.close();
+  });
+
+  it('answers 404 on both routes when the factory says registerController: false (case 4b)', async () => {
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const app = await boot(VerifyModule.forRootAsync({ useFactory: () => options({ registerController: false }) }));
+    const controller = app.get(VerifyController, { strict: false });
+    const call = (run: () => unknown) => {
+      try {
+        run();
+      } catch (e) {
+        return e;
+      }
+      return undefined;
+    };
+    const startErr = call(() => controller.start({ to: '+14155552671' }, '127.0.0.1'));
+    const checkErr = call(() => controller.check({ to: '+14155552671', code: '424242' }, '127.0.0.1'));
+    expect(startErr).toBeInstanceOf(NotFoundException);
+    expect((startErr as NotFoundException).message).toBe('Cannot POST /verify/start');
+    expect(checkErr).toBeInstanceOf(NotFoundException);
+    await app.close();
+  });
+
+  it('serves the routes when nothing turns them off (case 2b)', async () => {
+    const app = await boot(VerifyModule.forRootAsync({ useFactory: () => options() }));
+    const controller = app.get(VerifyController, { strict: false });
+    const started = await controller.start({ to: '+14155552671' }, '127.0.0.1');
+    expect(started.state).toBe('pending');
+    await app.close();
   });
 
   it('still provides a working VerifyService with the controller off (case 6)', async () => {
