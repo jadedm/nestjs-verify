@@ -119,17 +119,23 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
 - With pending changesets, `changesets/action` runs `pnpm changeset version` and opens or updates a
   "Version Packages" PR (Actions is allowed to create PRs in this repo since 6 Oct 2026). Before #19
   the step ran `pnpm version`, which pnpm passes to `npm version` and which changes nothing.
+- GitHub runs no workflows on a PR opened with the Actions token, so the Version Packages PR has no
+  checks and branch protection refuses to merge it. Close and reopen it (`gh pr close N && gh pr
+  reopen N`) to trigger CI, then merge; do not merge with `--admin`. It also carries Changesets'
+  formatting-only rewrite of `store-redis/package.json`, which changes no version.
 - With none, it publishes every package whose local version is not on npm, through npm trusted
   publishing (OIDC, no token). The job upgrades npm to 11 and `scripts/check-publish-env.mjs` fails
   the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 that tried to
   publish failed with E404: the job ran npm 10, which cannot publish with OIDC. It publishes with
   `pnpm changeset publish`, after `check:exports` has loaded that same build.
-- Each package needs a trusted publisher on npmjs.com (owner step, per package). Until a CI publish
-  has gone through, #19 stays open.
+- Each package needs a trusted publisher on npmjs.com (owner step, per package). None is set up: on
+  6 Oct 2026 the owner chose to keep publishing by hand for now, so after a Version Packages merge
+  the job's publish fails with E404 and the owner runs the fallback below. #19 stays open until
+  trusted publishers exist and one CI publish has gone through.
 
 Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
-agent's shell) the publish fails with `EOTP`, so hand the command over. Every version through 0.6.3
+agent's shell) the publish fails with `EOTP`, so hand the command over. Every version through 0.6.4
 was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
