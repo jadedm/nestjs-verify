@@ -269,6 +269,74 @@ describe('VerifyService, delivery limits', () => {
       expect(err.extras.retryAfterMs).toBeUndefined();
     });
 
+    it('cools down when the send succeeded but its record could not be written (review P1)', async () => {
+      const only = provider('ok', ok);
+      const service = build({ provider: only.p });
+      vi.spyOn(stores.abuse, 'recordSendAttempt').mockRejectedValueOnce(new Error('store down'));
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
+      expect(err.extras.retryAfterMs).toBe(30_000);
+      expect((await failure(service.start({ to: PHONE }))).code).toBe(VerifyErrorCode.CooldownActive);
+      expect(only.p.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('cools down when the send succeeded but the cooldown write failed once (review P2)', async () => {
+      const only = provider('ok', ok);
+      const service = build({ provider: only.p });
+      vi.spyOn(stores.cooldown, 'start').mockRejectedValueOnce(new Error('store down'));
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.extras.retryAfterMs).toBe(30_000);
+      expect((await failure(service.start({ to: PHONE }))).code).toBe(VerifyErrorCode.CooldownActive);
+      expect(only.p.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts the cooldown before cleanup that can fail (Codex review)', async () => {
+      const only = provider('stuck', never);
+      const service = build({ provider: only.p }, { attemptTimeoutMs: 20 });
+      vi.spyOn(stores.verify, 'delete').mockRejectedValueOnce(new Error('store down'));
+      await service.start({ to: PHONE }).catch(() => undefined);
+      expect(await stores.cooldown.remaining(PHONE)).toBeGreaterThan(0);
+    });
+
+    it('answers 503, not a raw error, when the cooldown store throws synchronously (review P3)', async () => {
+      const only = provider('stuck', never);
+      const service = build({ provider: only.p }, { attemptTimeoutMs: 20 });
+      vi.spyOn(stores.cooldown, 'start').mockImplementation(() => {
+        throw new Error('sync boom');
+      });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
+      expect(err.extras.retryAfterMs).toBeUndefined();
+    });
+
+    it('does not count a provider skipped for lack of budget as a timeout (review P5)', async () => {
+      const slowFail = provider('slow-fail', async () => {
+        await after(60);
+        throw new Error('rejected');
+      });
+      const backup = provider('backup', ok);
+      const service = build({ provider: slowFail.p, fallbacks: [backup.p] }, { attemptTimeoutMs: 100, totalTimeoutMs: 65 });
+      const err = await failure(service.start({ to: PHONE }));
+      expect(backup.p.send).not.toHaveBeenCalled();
+      expect(err.extras.retryAfterMs).toBeUndefined();
+      expect(await stores.cooldown.remaining(PHONE)).toBe(0);
+    });
+
+    it('scrubs the recipient from a provider that throws synchronously (review P4)', async () => {
+      const throwing: SmsProvider = {
+        name: 'sync',
+        send: () => {
+          throw new Error(`bad ${PHONE}`);
+        },
+      };
+      const recorded = vi.spyOn(stores.abuse, 'recordSendAttempt');
+      const service = build({ provider: throwing });
+      await failure(service.start({ to: PHONE }));
+      const errorCodes = recorded.mock.calls.map((c) => String(c[0].errorCode));
+      expect(errorCodes.join(' ')).not.toContain(PHONE);
+      expect(errorCodes.join(' ')).toContain('[recipient]');
+    });
+
     it('still removes the verification and records the failure (cases 6, 7)', async () => {
       const only = provider('stuck', never);
       const service = build({ provider: only.p }, { attemptTimeoutMs: 20 });

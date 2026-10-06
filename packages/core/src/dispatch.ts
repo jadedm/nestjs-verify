@@ -26,15 +26,19 @@ const requestIdOf = (err: unknown): string | undefined => {
   return typeof id === 'string' ? id : undefined;
 };
 
+// Promise.resolve().then() also catches a provider that throws synchronously,
+// which would otherwise skip the scrub.
 const scrubbed = async <T>(to: string, send: () => Promise<T>): Promise<T> =>
-  send().catch((err: unknown) => {
-    const source = err instanceof Error ? err : new Error(String(err));
-    const message = source.message.replace(new RegExp(escapeRegExp(to), 'gi'), '[recipient]');
-    const requestId = requestIdOf(err);
-    const clean = new Error(requestId ? `${message} (request id ${requestId})` : message);
-    clean.name = source.name;
-    throw clean;
-  });
+  Promise.resolve()
+    .then(send)
+    .catch((err: unknown) => {
+      const source = err instanceof Error ? err : new Error(String(err));
+      const message = source.message.replace(new RegExp(escapeRegExp(to), 'gi'), '[recipient]');
+      const requestId = requestIdOf(err);
+      const clean = new Error(requestId ? `${message} (request id ${requestId})` : message);
+      clean.name = source.name;
+      throw clean;
+    });
 
 const smsDeliverers = (options: VerifyModuleOptions): Deliverer[] => {
   if (!options.sms) return [];
