@@ -110,7 +110,11 @@ export interface VerifyModuleOptions {
     maxDistinctPhonesPerIp?: number;
     velocityWindowSeconds?: number;
   };
-  /** Mount the built-in /verify controller. Default true. */
+  /**
+   * Mount the built-in /verify controller. Default true. With `forRootAsync`,
+   * set `registerController` on the async options instead; returned from
+   * `useFactory` it cannot take effect, and an error is logged at startup.
+   */
   registerController?: boolean;
   /** SMS body template. {{code}} is replaced. Also the email body when `email.template` is unset. */
   messageTemplate?: string;
@@ -128,6 +132,12 @@ export interface VerifyModuleOptions {
 
 export interface VerifyModuleAsyncOptions
   extends Pick<ModuleMetadata, 'imports'> {
+  /**
+   * Mount the built-in /verify controller. Default true. Set it here, not in
+   * the `useFactory` result: the controller list is fixed before the factory
+   * runs, so a value returned from the factory cannot take effect.
+   */
+  registerController?: boolean;
   inject?: any[];
   useFactory: (
     ...args: any[]

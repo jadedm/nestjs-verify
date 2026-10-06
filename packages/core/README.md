@@ -65,6 +65,10 @@ POST /verify/check   { "to": "+14155552671", "code": "123456" }
 
 ```ts
 VerifyModule.forRootAsync({
+  // Set here, not in useFactory: the controller list is fixed before the
+  // factory runs. false leaves POST /verify/start and /verify/check unmounted,
+  // for apps that call VerifyService from their own routes.
+  registerController: true,
   inject: [ConfigService],
   useFactory: (c) => ({
     sms: { provider: ..., fallbacks: [...] },
@@ -78,7 +82,6 @@ VerifyModule.forRootAsync({
     rateLimit:  { perPhone: { count: 5, windowSeconds: 3600 } },
     abuse:      { maxDistinctPhonesPerIp: 10, velocityWindowSeconds: 300 },
     messageTemplate: 'Your code is {{code}}',
-    registerController: true,
     logging:    { verbose: false },
   }),
 })
