@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify-twilio
 
+## 0.6.1
+
+### Patch Changes
+
+- f0ff0dc: The provider now loads in ES module apps. Before, importing it from ESM failed at startup with "Named export 'Twilio' not found", on every supported twilio version, because `twilio` is a CommonJS package. CommonJS apps were not affected.
+
 ## 0.6.0
 
 ### Minor Changes
@@ -12,20 +18,17 @@
 
 - Released alongside `@jadedm/nestjs-verify` 0.5.0 (observability: AuditSink interface + Logger/Stdout/Memory sinks; OpenTelemetry tracing on verify.start, verify.check, verify.send_code; Prometheus metrics opt-in via prom-client). No functional change in this package; version bumped to keep the linked group aligned.
 
-
 ## 0.4.0
 
 ### Minor Changes
 
 - Released alongside `@jadedm/nestjs-verify` 0.4.0 (DX hardening: class-validator DTOs, OpenAPI annotations, structured error code catalog, asyncHandler utility). No functional change in this package; version bumped to keep the linked group aligned.
 
-
 ## 0.3.0
 
 ### Minor Changes (BREAKING)
 
 - Released alongside `@jadedm/nestjs-verify` 0.3.0, which dropped `@nestjs/cache-manager` and introduced three new store interfaces (`RateLimitStore`, `CooldownStore`, `PhoneIndexStore`). This package is unchanged in code but its peer range now points at core 0.3.x and the version was bumped to keep the linked group aligned.
-
 
 ## 0.2.0
 
