@@ -30,7 +30,7 @@ import {
   generateSid,
   hashCode,
 } from './code/code-gen.js';
-import { buildDeliverers, Deliverer } from './dispatch.js';
+import { buildDeliverers, Deliverer, reportsMayHaveSent } from './dispatch.js';
 import {
   DeliveryKind,
   Recipient,
@@ -385,7 +385,9 @@ export class VerifyService {
     // Monotonic, so a wall-clock step cannot stretch or shrink the budget.
     const chainStart = performance.now();
     let lastError: unknown;
-    let timedOut = false;
+    // True once an attempt timed out or its provider said the request may
+    // have been accepted: the message may still arrive.
+    let mayHaveSent = false;
     for (const deliverer of this.deliverers.get(recipient.kind) ?? []) {
       const remainingMs = this.totalTimeoutMs - (performance.now() - chainStart);
       if (remainingMs < MIN_ATTEMPT_WINDOW_MS) {
@@ -422,7 +424,7 @@ export class VerifyService {
       }
       if (!err) return deliverer.name;
       lastError = err;
-      if (err instanceof DeliveryTimeoutError) timedOut = true;
+      if (err instanceof DeliveryTimeoutError || reportsMayHaveSent(err)) mayHaveSent = true;
       this.log.warn(
         `provider ${deliverer.name} failed for ${this.redact(recipient.key)}: ${
           (err as Error).message
@@ -430,7 +432,7 @@ export class VerifyService {
       );
     }
     const message = lastError instanceof Error ? lastError.message : `All ${recipient.kind} providers failed`;
-    throw new DeliveryChainError(message, timedOut);
+    throw new DeliveryChainError(message, mayHaveSent);
   }
 
   /** Writes what a successful send requires: the cooldown and the send record. */

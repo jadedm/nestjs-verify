@@ -5,8 +5,8 @@ export class DeliveryTimeoutError extends Error {
 
 /**
  * Every provider in the chain failed. `mayHaveSent` is true when at least one
- * attempt timed out rather than failing outright: that request may still
- * reach the recipient.
+ * attempt timed out, or its provider marked the error `mayHaveSent: true`:
+ * that request may still reach the recipient.
  */
 export class DeliveryChainError extends Error {
   override name = 'DeliveryChainError';
