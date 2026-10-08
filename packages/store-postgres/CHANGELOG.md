@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify-postgres
 
+## 0.6.9
+
+### Patch Changes
+
+- 70ea822: The adapter now depends on `@types/pg`. Its type declarations use `pg`'s `Pool` and `PoolConfig`, and `pg` ships no types, so a strict TypeScript app had to install `@types/pg` itself or get TS7016 (with `skipLibCheck` on, those types were silently `any`). The adapter's own types now need nothing installed. The range is `^8.6.0`, every published 8.x, so an app that already has `@types/pg` 8.x shares one copy and its `Pool` stays assignable to the adapter's `pool` option. An app that imports from `pg` itself still installs `@types/pg` as usual.
+
 ## 0.6.0
 
 ### Minor Changes
@@ -20,7 +26,6 @@
 
 - Released alongside `@jadedm/nestjs-verify` 0.4.0 (DX hardening: class-validator DTOs, OpenAPI annotations, structured error code catalog, asyncHandler utility). No functional change in this package; version bumped to keep the linked group aligned.
 
-
 ## 0.3.0
 
 ### Minor Changes (BREAKING)
@@ -32,7 +37,6 @@
 - New `createPostgresStores` factory returns all five stores plus a shared `pg.Pool` in one call. Replaces the per-store constructor pattern.
 - New `runMigrations` runner with `pg_try_advisory_lock` for concurrent-instance safety. Each migration runs in a transaction and the version counter is tracked in a `verify_schema_versions` table. The previously exported `VERIFICATIONS_TABLE_DDL` and `ABUSE_TABLE_DDL` constants have been removed; the schema is now encoded in the exported `MIGRATIONS` array.
 - `PostgresVerifyStore` and `PostgresAbuseStore` no longer expose `ensureSchema()`. Schema setup runs as part of the factory.
-
 
 ## 0.2.0
 
