@@ -96,6 +96,7 @@ export class VerifyService {
   private readonly deliverers: Map<DeliveryKind, Deliverer[]>;
   private readonly attemptTimeoutMs: number;
   private readonly totalTimeoutMs: number;
+  private readonly fallbackAfterUncertain: boolean;
 
   constructor(
     @Inject(VERIFY_MODULE_OPTIONS)
@@ -104,6 +105,12 @@ export class VerifyService {
     this.deliverers = buildDeliverers(options);
     this.attemptTimeoutMs = options.delivery?.attemptTimeoutMs ?? DEFAULTS.attemptTimeoutMs;
     this.totalTimeoutMs = options.delivery?.totalTimeoutMs ?? DEFAULTS.totalTimeoutMs;
+    this.fallbackAfterUncertain = options.delivery?.fallbackAfterUncertain ?? true;
+    // A string such as "false" from env-driven config would be truthy and
+    // silently keep the fallbacks on.
+    if (typeof this.fallbackAfterUncertain !== 'boolean') {
+      throw new Error('delivery.fallbackAfterUncertain must be a boolean.');
+    }
     if (!isValidLimitMs(this.attemptTimeoutMs) || !isValidLimitMs(this.totalTimeoutMs)) {
       throw new Error(
         `delivery.attemptTimeoutMs and delivery.totalTimeoutMs must be positive, finite numbers of milliseconds, at most ${MAX_TIMER_MS}.`,
@@ -425,12 +432,21 @@ export class VerifyService {
       }
       if (!err) return deliverer.name;
       lastError = err;
-      if (err instanceof DeliveryTimeoutError || reportsMayHaveSent(err)) mayHaveSent = true;
+      const attemptMayHaveSent = err instanceof DeliveryTimeoutError || reportsMayHaveSent(err);
+      mayHaveSent = mayHaveSent || attemptMayHaveSent;
       this.log.warn(
         `provider ${deliverer.name} failed for ${this.redact(recipient.key)}: ${
           (err as Error).message
         }`,
       );
+      // A fallback after a possibly delivered attempt can send the code twice
+      // (#51); with fallbackAfterUncertain false the chain stops here.
+      if (attemptMayHaveSent && !this.fallbackAfterUncertain) {
+        this.log.warn(
+          `provider ${deliverer.name} may have sent to ${this.redact(recipient.key)}; not trying fallbacks (delivery.fallbackAfterUncertain is false)`,
+        );
+        break;
+      }
     }
     const message = lastError instanceof Error ? lastError.message : `All ${recipient.kind} providers failed`;
     throw new DeliveryChainError(message, mayHaveSent);

@@ -31,7 +31,8 @@ export interface GupshupSmsProviderOptions {
    * code a second time. With false, such a failure is thrown at once, marked
    * mayHaveSent, and the user's retry waits for the cooldown. Failures known
    * not to have sent (429, 503, refused connection, DNS) are retried either way.
-   * The core may still try the next provider in `fallbacks` (#51).
+   * The core still tries the next provider in `fallbacks` unless its
+   * `delivery.fallbackAfterUncertain` is false.
    */
   retryAfterUncertain?: boolean;
   /** Override the fetch implementation (useful for tests). */
