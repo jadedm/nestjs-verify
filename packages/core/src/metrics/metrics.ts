@@ -173,17 +173,78 @@ export function createMetricsRecorder(opts: {
   if (!opts.enabled) return new NoopMetricsRecorder();
   let prom: PromModule;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    prom = require('prom-client') as PromModule;
-  } catch {
-    log.warn(
-      'observability.metrics.enabled is true, but prom-client is not installed; skipping metrics. ' +
-        'pnpm add prom-client to enable.',
-    );
+    prom = loadPromClient();
+  } catch (err) {
+    log.warn(metricsLoadWarning(err));
     return new NoopMetricsRecorder();
   }
   const prefix = opts.prefix ?? METRICS.DEFAULT_PREFIX;
   return new PromMetricsRecorder(prom, prefix, opts.registry as PromRegistry);
 }
+
+// Defined only in the ESM build, by a tsup banner (see tsup.config.ts).
+declare const __VERIFY_ESM_REQUIRE__: ((id: string) => unknown) | undefined;
+
+/**
+ * Loads the optional peer by trying each loader in turn rather than detecting
+ * the environment: esbuild rewrites `typeof require` in the ESM build to its
+ * own stub, which always looks like a function. The ESM build's helper works
+ * in a plain ES module; require works in CommonJS and in bundlers. Each
+ * loader also says how it fails when it cannot work in this environment at
+ * all, so that failure is set aside and the real error is reported.
+ */
+type Loader = { load: () => unknown; unavailable: (err: unknown) => boolean };
+
+const errorText = (err: unknown) => {
+  const { code, message, stack } = (err ?? {}) as { code?: unknown; message?: unknown; stack?: unknown };
+  return { code, message: typeof message === 'string' ? message : '', stack: typeof stack === 'string' ? stack : '' };
+};
+
+const loadPromClient = (): PromModule => {
+  const loaders: Loader[] = [
+    {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      load: () => require('prom-client'),
+      // esbuild's ESM stub when no require exists (a plain ES module).
+      unavailable: (err) => /Dynamic require of .* is not supported/.test(errorText(err).message),
+    },
+  ];
+  if (typeof __VERIFY_ESM_REQUIRE__ === 'function') {
+    const esmRequire = __VERIFY_ESM_REQUIRE__;
+    loaders.unshift({
+      load: () => esmRequire('prom-client'),
+      // Inside a bundle: esbuild to CommonJS empties import.meta, and webpack
+      // turns the helper into an empty context or drops createRequire.
+      unavailable: (err) => {
+        const { code, message, stack } = errorText(err);
+        return code === 'ERR_INVALID_ARG_VALUE' || /webpack(Empty)?Context/.test(stack) || /is not a function/.test(message);
+      },
+    });
+  }
+  const failures: { err: unknown; unavailable: boolean }[] = [];
+  for (const loader of loaders) {
+    try {
+      return loader.load() as PromModule;
+    } catch (err) {
+      failures.push({ err, unavailable: loader.unavailable(err) });
+    }
+  }
+  throw (failures.find((f) => !f.unavailable) ?? failures[0]).err;
+};
+
+/**
+ * Says prom-client is missing only when it is: the first line must name it,
+ * since a missing dependency of prom-client also lists prom-client in the
+ * require stack below.
+ */
+const metricsLoadWarning = (err: unknown): string => {
+  const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
+  const firstLine = typeof message === 'string' ? message.split('\n')[0] : '';
+  const missing = code === 'MODULE_NOT_FOUND' && /Cannot find (module|package) 'prom-client'/.test(firstLine);
+  if (missing) {
+    return 'observability.metrics.enabled is true, but prom-client is not installed; skipping metrics. pnpm add prom-client to enable.';
+  }
+  return `observability.metrics.enabled is true, but prom-client could not be loaded (${typeof message === 'string' ? message : String(err)}); skipping metrics.`;
+};
 
 export { BLOCK_REASON, CHECK_OUTCOME, SMS_OUTCOME };
