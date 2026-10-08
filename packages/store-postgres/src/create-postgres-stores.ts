@@ -49,7 +49,16 @@ export async function createPostgresStores(
     );
   }
 
-  await runMigrations(pool, { skipSchemaSetup: opts.skipSchemaSetup });
+  // A pool created here is ours to close if startup fails; otherwise its
+  // connections stay open until the process exits (#65). A pool the caller
+  // passed in stays the caller's. The migration error is the one reported.
+  const createdHere = !opts.pool;
+  try {
+    await runMigrations(pool, { skipSchemaSetup: opts.skipSchemaSetup });
+  } catch (err) {
+    if (createdHere) await pool.end().catch(() => undefined);
+    throw err;
+  }
 
   return {
     verify: new PostgresVerifyStore({ pool }),
