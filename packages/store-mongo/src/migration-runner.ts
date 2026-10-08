@@ -56,15 +56,17 @@ export async function runMongoMigrations(
   // Try to acquire the lock. Loop in case another instance holds it.
   let lockAcquired = false;
   for (let i = 0; i < 60 && !lockAcquired; i++) {
+    // Same { value } shape under drivers 5 and 6; without it driver 5's
+    // result object is always truthy and the lock always looks acquired (#79).
     const res = await meta.findOneAndUpdate(
       {
         _id: PACKAGE_NAME,
         $or: [{ lockUntil: { $exists: false } }, { lockUntil: { $lt: new Date() } }],
       },
       { $set: { lockUntil } },
-      { returnDocument: 'after' },
+      { returnDocument: 'after', includeResultMetadata: true },
     );
-    if (res) {
+    if (res.value) {
       lockAcquired = true;
       break;
     }

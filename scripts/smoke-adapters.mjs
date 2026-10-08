@@ -14,13 +14,22 @@
  *   pnpm build
  *   node scripts/smoke-adapters.mjs
  *   docker compose -f scripts/docker-compose.smoke.yml down -v
+ *
+ * SMOKE_BACKENDS picks the backends (default "postgres,mongo,redis"). Each
+ * backend's packages are imported only when it runs, so the script also runs
+ * from a project that has only core and one store installed
+ * (scripts/smoke-mongo-drivers.mjs runs it that way per mongodb driver).
  */
 import 'reflect-metadata';
-import Redis from 'ioredis';
 import { MemoryVerifyStore, MockEmailProvider, VerifyService } from '@jadedm/nestjs-verify';
-import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
-import { createMongoStores } from '@jadedm/nestjs-verify-mongo';
-import { createRedisStores } from '@jadedm/nestjs-verify-redis';
+
+const BACKENDS = (process.env.SMOKE_BACKENDS ?? 'postgres,mongo,redis').split(',').map((b) => b.trim());
+const KNOWN = ['postgres', 'mongo', 'redis'];
+const unknownBackends = BACKENDS.filter((b) => !KNOWN.includes(b));
+if (unknownBackends.length > 0 || BACKENDS.length === 0) {
+  console.error(`SMOKE_BACKENDS must name some of ${KNOWN.join(', ')}; got "${process.env.SMOKE_BACKENDS}"`);
+  process.exit(2);
+}
 
 const PG_URL = process.env.SMOKE_PG_URL ?? 'postgres://postgres:test@localhost:55432/verify';
 const MG_URL = process.env.SMOKE_MG_URL ?? 'mongodb://localhost:57017';
@@ -223,7 +232,33 @@ async function exerciseEmailFlow(name, stores) {
   assert(sent.length - before === 1, 'one code sent');
 }
 
+// A second start must wait while another instance holds the migration lock.
+async function exerciseMongoMigrationLock(createMongoStores, mongodb) {
+  console.log('\n--- Mongo migration lock ---');
+  const client = await mongodb.MongoClient.connect(MG_URL);
+  const db = client.db(`${MG_DB}_lock_${RUN}`);
+  await createMongoStores({ db });
+  const meta = db.collection('verify_schema_versions');
+  await meta.updateOne({ _id: '@jadedm/nestjs-verify-mongo' }, { $set: { lockUntil: new Date(Date.now() + 120_000) } });
+  const second = createMongoStores({ db }).then(() => 'acquired', (e) => `error: ${e.message}`);
+  const first = await Promise.race([second, new Promise((r) => setTimeout(() => r('waited'), 2_500))]);
+  assert(first === 'waited', `a held migration lock makes a second start wait, got ${first}`);
+  await meta.updateOne({ _id: '@jadedm/nestjs-verify-mongo' }, { $unset: { lockUntil: '' } });
+  assert((await second) === 'acquired', 'the second start goes ahead once the lock is free');
+  await db.dropDatabase();
+  await client.close();
+}
+
 async function main() {
+  if (BACKENDS.includes('postgres')) await smokePostgres();
+  if (BACKENDS.includes('mongo')) await smokeMongo();
+  if (BACKENDS.includes('redis')) await smokeRedis();
+  console.log(`\nALL ADAPTER CONTRACTS VERIFIED (${BACKENDS.join(', ')})`);
+  process.exit(0);
+}
+
+async function smokePostgres() {
+  const { createPostgresStores } = await import('@jadedm/nestjs-verify-postgres');
   // ---- Postgres: all 5 stores ----
   console.log('=== Postgres ===');
   const pg = await createPostgresStores({ connectionString: PG_URL });
@@ -235,7 +270,11 @@ async function main() {
   await exerciseAuditSink('Postgres', pg.audit);
   await exerciseEmailFlow('Postgres', pg);
   await pg.pool.end();
+}
 
+async function smokeMongo() {
+  const { createMongoStores } = await import('@jadedm/nestjs-verify-mongo');
+  const mongodb = await import('mongodb');
   // ---- Mongo: all 5 stores ----
   console.log('\n=== Mongo ===');
   const mg = await createMongoStores({ uri: MG_URL, databaseName: MG_DB });
@@ -247,7 +286,12 @@ async function main() {
   await exerciseAuditSink('Mongo', mg.audit);
   await exerciseEmailFlow('Mongo', mg);
   await mg.close?.();
+  await exerciseMongoMigrationLock(createMongoStores, mongodb);
+}
 
+async function smokeRedis() {
+  const { default: Redis } = await import('ioredis');
+  const { createRedisStores } = await import('@jadedm/nestjs-verify-redis');
   // ---- Redis: 3 ephemeral stores ----
   console.log('\n=== Redis ===');
   const client = new Redis({ host: REDIS_HOST, port: REDIS_PORT });
@@ -258,9 +302,6 @@ async function main() {
   await exercisePhoneIndexStore('Redis', r.phoneIndex);
   await exerciseEmailFlow('Redis', { ...r, verify: new MemoryVerifyStore() });
   await client.quit();
-
-  console.log('\nALL ADAPTER CONTRACTS VERIFIED');
-  process.exit(0);
 }
 
 main().catch((e) => { console.error('FAIL with exception:', e); process.exit(1); });

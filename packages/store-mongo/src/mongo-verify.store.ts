@@ -81,7 +81,10 @@ export class MongoVerifyStore implements VerifyStore {
     // Atomic: increment AND conditionally flip status to 'canceled' if the
     // new count reaches max_attempts. Single round-trip via aggregation-
     // pipeline update (Mongo 4.2+), returning the post-update document.
-    const updated = await this.col.findOneAndUpdate(
+    // includeResultMetadata gives the same { value } shape under drivers 5
+    // and 6; driver 5 returns it by default and 6 returns the bare document
+    // (#79).
+    const result = await this.col.findOneAndUpdate(
       { _id: sid, status: 'pending' },
       [
         { $set: { attempts: { $add: ['$attempts', 1] } } },
@@ -97,8 +100,9 @@ export class MongoVerifyStore implements VerifyStore {
           },
         },
       ],
-      { returnDocument: 'after' },
+      { returnDocument: 'after', includeResultMetadata: true },
     );
+    const updated = result.value;
 
     if (updated) {
       const record = this.toRecord(updated);
