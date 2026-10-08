@@ -134,7 +134,7 @@ try {
 const nodeMajor = process.versions.node.split('.')[0];
 // @types/pg matches the documented setup: the postgres adapter's README tells
 // users to install it, since its declarations use pg's types (#49).
-const toolSpecs = ['typescript@5', `@types/node@${nodeMajor}`, '@types/pg@8'];
+const toolSpecs = ['typescript@5', `@types/node@${nodeMajor}`, '@types/pg@8', 'esbuild@0.24'];
 
 // --- static dependency check: bare specifiers in the built files
 const BUILTINS = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
@@ -181,18 +181,38 @@ const loadKeys = (projectDir, name, kind) => {
 // loading alone does not show. Each prints one word; `expect` maps the
 // optional-peer state to that word.
 const CORE = '@jadedm/nestjs-verify';
+// kind: 'esm' (dynamic import), 'cjs' (require), 'module' (a static import,
+// as an app file bundled by esbuild is written).
 const metricsProbe = (kind) => {
+  const body = `const r = createMetricsRecorder({ enabled: true }); console.log(r.getRegistry() ? 'registry' : 'noop')`;
+  if (kind === 'module') return `import { createMetricsRecorder } from '${CORE}';\n${body}`;
   const get = kind === 'esm' ? `(await import('${CORE}'))` : `require('${CORE}')`;
-  return `const { createMetricsRecorder } = ${get}; const r = createMetricsRecorder({ enabled: true }); console.log(r.getRegistry() ? 'registry' : 'noop')`;
+  return `const { createMetricsRecorder } = ${get}; ${body}`;
 };
 const PROBES = [
   // prom-client is an optional peer loaded with require(); ESM builds once
   // lost it silently (#48).
   { name: 'metrics recorder', pkg: CORE, code: metricsProbe, expect: { withOptional: 'registry', withoutOptional: 'noop' } },
 ];
+// esbuild-cjs: the app bundled to CommonJS by esbuild with @jadedm/* inlined
+// (their ESM builds, via the import condition) and every other package
+// external, the usual serverless setup. It rewrites import.meta, which once
+// crashed the core at load (#48).
+const BUNDLE_SCRIPT = `require('esbuild').build({
+  entryPoints: ['probe-app.mjs'], bundle: true, platform: 'node', format: 'cjs', outfile: 'probe-bundle.cjs', logLevel: 'error',
+  plugins: [{ name: 'externals', setup(b) { b.onResolve({ filter: /^[^./]/ }, (a) => (a.path.startsWith('${OWN_SCOPE}') ? undefined : { path: a.path, external: true })); } }],
+}).catch(() => process.exit(1));`;
+const probeRun = (projectDir, probe, kind) => {
+  if (kind === 'esm') return run(process.execPath, ['--input-type=module', '-e', probe.code('esm')], { cwd: projectDir, timeout: LOAD_TIMEOUT_MS });
+  if (kind === 'cjs') return run(process.execPath, ['-e', probe.code('cjs')], { cwd: projectDir, timeout: LOAD_TIMEOUT_MS });
+  writeFileSync(join(projectDir, 'probe-app.mjs'), probe.code('module'));
+  writeFileSync(join(projectDir, 'probe-bundle-build.cjs'), BUNDLE_SCRIPT);
+  const built = run(process.execPath, ['probe-bundle-build.cjs'], { cwd: projectDir });
+  if (built.status !== 0) return built;
+  return run(process.execPath, ['probe-bundle.cjs'], { cwd: projectDir, timeout: LOAD_TIMEOUT_MS });
+};
 const runProbe = (projectDir, probe, kind, state) => {
-  const args = kind === 'esm' ? ['--input-type=module', '-e', probe.code(kind)] : ['-e', probe.code(kind)];
-  const r = run(process.execPath, args, { cwd: projectDir, timeout: LOAD_TIMEOUT_MS });
+  const r = probeRun(projectDir, probe, kind);
   const got = r.status === 0 ? r.stdout.trim().split('\n').at(-1) : `exit ${r.status ?? r.signal ?? r.error?.code}: ${tail(r, 3)}`;
   const want = probe.expect[state];
   if (got !== want) fail(`${probe.pkg} ${probe.name} (${kind}, ${state}): got ${got}, want ${want}`);
@@ -201,7 +221,7 @@ const runProbe = (projectDir, probe, kind, state) => {
 const runProbes = (projectDir, state) => {
   const present = new Set(checked.map(({ pkg }) => pkg.name));
   for (const probe of PROBES.filter((p) => present.has(p.pkg))) {
-    for (const kind of ['esm', 'cjs']) runProbe(projectDir, probe, kind, state);
+    for (const kind of ['esm', 'cjs', 'esbuild-cjs']) runProbe(projectDir, probe, kind, state);
   }
 };
 

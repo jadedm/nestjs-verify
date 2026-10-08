@@ -17,12 +17,15 @@ export default defineConfig({
     __PACKAGE_VERSION__: JSON.stringify(pkg.version),
   },
   // The optional peer prom-client is loaded with require() so it can be
-  // missing. In an ES module `require` does not exist, and tsup's __require
-  // stub then throws, which silently turned metrics off for ESM apps (#48).
-  // Give the ESM build a real require, resolved from this file.
+  // missing. A plain ES module has no require, which silently turned metrics
+  // off for ESM apps (#48). The ESM build gets a function that makes one from
+  // this file, called only when no require exists and only inside the
+  // loader's try: nothing runs at load, so a bundle that rewrites
+  // import.meta (esbuild to CommonJS) cannot crash at startup, and bundlers
+  // that provide require keep using it.
   banner: ({ format }) =>
     format === 'esm'
-      ? { js: "import { createRequire as __verifyCreateRequire } from 'node:module';\nconst require = __verifyCreateRequire(import.meta.url);" }
+      ? { js: "import { createRequire as __verifyCreateRequire } from 'node:module';\nconst __VERIFY_ESM_REQUIRE__ = (id) => __verifyCreateRequire(import.meta.url)(id);" }
       : {},
   // Peer deps must NEVER be bundled. Bundling causes class identity (e.g.
   // HttpException) to diverge from the user's @nestjs/common at runtime

@@ -173,8 +173,7 @@ export function createMetricsRecorder(opts: {
   if (!opts.enabled) return new NoopMetricsRecorder();
   let prom: PromModule;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    prom = require('prom-client') as PromModule;
+    prom = loadPromClient();
   } catch (err) {
     log.warn(metricsLoadWarning(err));
     return new NoopMetricsRecorder();
@@ -183,10 +182,46 @@ export function createMetricsRecorder(opts: {
   return new PromMetricsRecorder(prom, prefix, opts.registry as PromRegistry);
 }
 
-/** Says prom-client is missing only when it is; any other load failure is reported as itself. */
+// Defined only in the ESM build, by a tsup banner (see tsup.config.ts).
+declare const __VERIFY_ESM_REQUIRE__: ((id: string) => unknown) | undefined;
+
+/**
+ * Loads the optional peer by trying each loader in turn rather than detecting
+ * the environment: esbuild rewrites `typeof require` in the ESM build to its
+ * own stub, which always looks like a function. The ESM build's helper works
+ * in a plain ES module and fails harmlessly inside a bundle that rewrote
+ * import.meta; require works in CommonJS and in bundlers. If all fail, a
+ * "not found" error is reported in preference to the others.
+ */
+const loadPromClient = (): PromModule => {
+  const loaders: (() => unknown)[] = [
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    () => require('prom-client'),
+  ];
+  if (typeof __VERIFY_ESM_REQUIRE__ === 'function') {
+    const esmRequire = __VERIFY_ESM_REQUIRE__;
+    loaders.unshift(() => esmRequire('prom-client'));
+  }
+  const errors: unknown[] = [];
+  for (const load of loaders) {
+    try {
+      return load() as PromModule;
+    } catch (err) {
+      errors.push(err);
+    }
+  }
+  throw errors.find((e) => (e as { code?: unknown } | null)?.code === 'MODULE_NOT_FOUND') ?? errors[0];
+};
+
+/**
+ * Says prom-client is missing only when it is: the first line must name it,
+ * since a missing dependency of prom-client also lists prom-client in the
+ * require stack below.
+ */
 const metricsLoadWarning = (err: unknown): string => {
   const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
-  const missing = code === 'MODULE_NOT_FOUND' && typeof message === 'string' && message.includes('prom-client');
+  const firstLine = typeof message === 'string' ? message.split('\n')[0] : '';
+  const missing = code === 'MODULE_NOT_FOUND' && /Cannot find (module|package) 'prom-client'/.test(firstLine);
   if (missing) {
     return 'observability.metrics.enabled is true, but prom-client is not installed; skipping metrics. pnpm add prom-client to enable.';
   }
