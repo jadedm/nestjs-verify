@@ -54,7 +54,7 @@ Your app imports `pg` here, so it installs `@types/pg` too. Nest runs `onApplica
 
 The first call to `createPostgresStores` creates the tables (`verifications`, `verify_abuse_log`, `verify_rate_limits`, `verify_cooldowns`, `verify_phone_index`, `verify_audit_log`) and records the applied version in `verify_schema_versions`. Later calls apply only what is missing, so restarts are cheap. Migrations run under a Postgres advisory lock, so several instances starting at once wait for each other instead of racing, and each migration runs in a transaction. Startup also refuses a database whose recorded version is newer than this package knows, for example after rolling the package back.
 
-To manage the schema yourself, pass `skipSchemaSetup: true`: no DDL runs, and startup fails if the database is not at the version this package expects. The SQL is exported as `MIGRATIONS`, and `runMigrations(pool)` applies it from your own tooling.
+To manage the schema yourself, pass `skipSchemaSetup: true`: no DDL runs, and startup fails if the database is not at the version this package expects. The SQL is exported as `MIGRATIONS`, and `runMigrations(pool)` applies it from your own tooling. Version 3 (0.7.0) adds a `holder` column to `verify_cooldowns`; a store given a custom `tableName` needs it too.
 
 ## Atomicity
 

@@ -98,7 +98,7 @@ The architectural shape of 0.3.0 onward. Every piece of state lives behind a sto
 | `VerifyStore` | Pending and terminal verification records, the source of truth | Postgres, Mongo |
 | `AbuseStore` | Send-attempt history for IP/phone velocity heuristics. Optional. | Postgres, Mongo |
 | `RateLimitStore` | Fixed-window counter per phone and per IP. Atomic. | Postgres, Mongo, Redis |
-| `CooldownStore` | Per-phone cooldown between sends. Returns ms remaining. | Postgres, Mongo, Redis |
+| `CooldownStore` | Per-phone cooldown between sends. `claim` must decide the holder atomically, so of simultaneous starts for one phone only one sends; `release` ends a claim only for its holder. | Postgres, Mongo, Redis |
 | `PhoneIndexStore` | Phone -> sid lookup so check() does not need the sid | Postgres, Mongo, Redis |
 
 You can use a single backend for all five, or split durable vs ephemeral (Postgres for `verify` and `abuse`, Redis for the other three) for speed.
@@ -143,7 +143,7 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 * Salted SHA-256 storage of codes at rest. The code is never persisted in clear.
 * Atomic attempt counters using `UPDATE ... RETURNING` (Postgres) and aggregation pipeline updates (Mongo). Lockout on max attempts happens in a single round trip.
 * Per-phone and per-IP rate limiting with fixed window semantics.
-* Per-phone cooldown after each send.
+* Per-phone cooldown after each send, claimed atomically before sending, so simultaneous starts for one phone send one code.
 * Distinct-phones-per-IP velocity check, configurable window.
 * Pluggable provider strategy with a fallback chain.
 * TTL on verification records: native TTL index in Mongo, schema-managed expiry in Postgres.
