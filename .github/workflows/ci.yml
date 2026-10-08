@@ -81,3 +81,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:adapters
+      # The workspace installs mongodb 6 only; run the Mongo stores under
+      # every driver major their peer range accepts (#79).
+      - run: pnpm test:adapters:mongo-drivers

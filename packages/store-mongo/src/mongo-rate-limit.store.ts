@@ -49,7 +49,8 @@ export class MongoRateLimitStore implements RateLimitStore {
     // handles three cases in one expression: insert (no doc), reset
     // (resetAt elapsed), increment (within window).
     const windowMs = windowSeconds * 1000;
-    const updated = await this.col.findOneAndUpdate(
+    // Same { value } shape under drivers 5 and 6 (#79).
+    const result = await this.col.findOneAndUpdate(
       { _id: key },
       [
         {
@@ -81,13 +82,16 @@ export class MongoRateLimitStore implements RateLimitStore {
           },
         },
       ],
-      { upsert: true, returnDocument: 'after' },
+      { upsert: true, returnDocument: 'after', includeResultMetadata: true },
     );
+    const updated = result.value;
+    // The key names a phone or an IP, so it stays out of the message.
+    if (!updated) throw new Error('MongoRateLimitStore: the upsert returned no document');
     return {
-      count: updated!.count,
+      count: updated.count,
       limit,
-      exceeded: updated!.count > limit,
-      resetAt: updated!.resetAt.getTime(),
+      exceeded: updated.count > limit,
+      resetAt: updated.resetAt.getTime(),
     };
   }
 

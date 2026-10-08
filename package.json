@@ -25,7 +25,8 @@
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm build && changeset publish",
-    "test:adapters": "docker compose -f scripts/docker-compose.smoke.yml up -d --wait && pnpm build && node scripts/smoke-adapters.mjs; ec=$?; docker compose -f scripts/docker-compose.smoke.yml down -v; exit $ec"
+    "test:adapters": "docker compose -f scripts/docker-compose.smoke.yml up -d --wait && pnpm build && node scripts/smoke-adapters.mjs; ec=$?; docker compose -f scripts/docker-compose.smoke.yml down -v; exit $ec",
+    "test:adapters:mongo-drivers": "docker compose -f scripts/docker-compose.smoke.yml up -d --wait mongo && pnpm build && node scripts/smoke-mongo-drivers.mjs; ec=$?; docker compose -f scripts/docker-compose.smoke.yml down -v; exit $ec"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
