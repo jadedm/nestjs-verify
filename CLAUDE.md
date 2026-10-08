@@ -48,10 +48,14 @@ Core (`packages/core/src`):
 - `verify.module.ts`: `VerifyModule.forRoot` / `forRootAsync` bind the options under
   `VERIFY_MODULE_OPTIONS` and provide `VerifyService`. `forRoot` mounts `VerifyController` unless
   `registerController: false`; `forRootAsync` always mounts it and ignores that option (#18).
-- `verify.service.ts`: all flow logic. `start`: resolve recipient, cooldown, per-phone then per-IP
-  rate limit, IP velocity check, create record and phone index, send, then start cooldown and record
-  the send. If the send or that follow-up bookkeeping fails, the record and index are deleted and
-  `SmsDispatchFailedException` (503) is thrown. `check`: phone index to sid, load record, only a
+- `verify.service.ts`: all flow logic. `start`: resolve recipient, claim the cooldown atomically for
+  this sid (`CooldownStore.claim`; of simultaneous starts for one recipient only one gets past it,
+  #13), per-phone then per-IP rate limit, IP velocity check, create the record, renew the claim, write
+  the phone index, renew it again, send, then start the cooldown and record the send. A start whose
+  claim lapsed and was taken stops at a renewal with 429 and removes only its own record. A refusal
+  before the send, or a send that definitely failed, releases the claim (after its cleanup), so it
+  leaves no cooldown. If the send or the bookkeeping after it fails, the record and
+  index are deleted and `SmsDispatchFailedException` (503) is thrown. `check`: phone index to sid, load record, only a
   `pending` record can approve, expiry is checked lazily on read, a wrong code calls the store's atomic
   `incrementAttempts`.
 - `recipient.ts`: a recipient has a `key` (store key: E.164 phone, or the lowercased email) and an

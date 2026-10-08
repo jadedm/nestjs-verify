@@ -39,6 +39,9 @@ import {
   redact,
 } from './recipient.js';
 
+/** Time a cooldown claim allows, beyond the send window, for the store writes before the send (#13). */
+const CLAIM_MARGIN_SECONDS = 30;
+
 export interface StartParams {
   to: string;
   channel?: VerificationChannel;
@@ -116,6 +119,13 @@ export class VerifyService {
         `delivery.attemptTimeoutMs and delivery.totalTimeoutMs must be positive, finite numbers of milliseconds, at most ${MAX_TIMER_MS}.`,
       );
     }
+    // A store written before 0.7.0 compiles only with a cast or in plain JS;
+    // refuse it on boot rather than on the first start.
+    const cooldown = options.stores.cooldown as unknown as Record<string, unknown>;
+    const missing = ['claim', 'release'].filter((m) => typeof cooldown[m] !== 'function');
+    if (missing.length > 0) {
+      throw new Error(`stores.cooldown must implement ${missing.join(' and ')} (required since 0.7.0, #13).`);
+    }
     this.metrics = createMetricsRecorder({
       enabled: options.observability?.metrics?.enabled,
       registry: options.observability?.metrics?.registry,
@@ -178,35 +188,40 @@ export class VerifyService {
     span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(phone));
     this.vlog(`start: phone=${this.redact(phone)} channel=${channel} ip=${params.ip ?? '-'}`);
 
-    const cooldownMs = await this.options.stores.cooldown.remaining(phone);
-    if (cooldownMs > 0) {
-      this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)} remainingMs=${cooldownMs}`);
-      this.metrics.startsBlocked(BLOCK_REASON.Cooldown);
-      await this.audit({
-        type: 'rate_limited',
-        phoneRedacted: this.redact(phone),
-        ip: params.ip,
-        channel,
-        outcome: 'cooldown',
-        meta: { retryAfterMs: cooldownMs },
-      });
-      throw new CooldownActiveException(cooldownMs);
-    }
+    const cooldownSeconds =
+      this.options.attempts?.cooldownSeconds ?? DEFAULTS.cooldownSeconds;
+    const sid = generateSid();
+    span.setAttribute(TELEMETRY.ATTR_SID, sid);
 
-    await this.enforceRateLimits(phone, params.ip, channel);
-    await this.enforceAbuseHeuristics(phone, params.ip, channel);
+    // The cooldown is claimed atomically, held by this sid, before anything
+    // else, so of simultaneous starts for one recipient only one goes on to
+    // send (#13). The claim is renewed after the record is written and then
+    // has to outlast the index write, the audit write and the whole send
+    // window; CLAIM_MARGIN_SECONDS covers the two writes. A claim still lapses
+    // if they take longer than that, and a start arriving then can send.
+    const claimSeconds =
+      cooldownSeconds > 0
+        ? Math.max(cooldownSeconds, Math.ceil(this.totalTimeoutMs / 1000) + CLAIM_MARGIN_SECONDS)
+        : 0;
+    const blockedMs = await this.claimCooldown(phone, claimSeconds, sid);
+    if (blockedMs > 0) throw await this.blockedByCooldown(phone, params.ip, channel, blockedMs);
+    // Every refusal before the send gives the claim back: none of them starts
+    // a cooldown today, so an immediate retry is not blocked by one.
+    const releaseClaim = () =>
+      this.tryCleanup('cooldown release', async () => {
+        if (claimSeconds > 0) await this.options.stores.cooldown.release(phone, sid);
+      });
+
+    await this.releasingOnError(releaseClaim, () => this.enforceRateLimits(phone, params.ip, channel));
+    await this.releasingOnError(releaseClaim, () => this.enforceAbuseHeuristics(phone, params.ip, channel));
 
     const codeLength = this.options.code?.length ?? DEFAULTS.codeLength;
     const ttlSeconds = this.options.code?.ttlSeconds ?? DEFAULTS.ttlSeconds;
     const maxAttempts =
       this.options.attempts?.max ?? DEFAULTS.maxAttempts;
-    const cooldownSeconds =
-      this.options.attempts?.cooldownSeconds ?? DEFAULTS.cooldownSeconds;
 
     const code = this.options.code?.fixedCode ?? generateCode(codeLength);
     const salt = generateSalt();
-    const sid = generateSid();
-    span.setAttribute(TELEMETRY.ATTR_SID, sid);
     const now = new Date();
     const record: VerificationRecord = {
       sid,
@@ -221,8 +236,40 @@ export class VerifyService {
       expiresAt: new Date(now.getTime() + ttlSeconds * 1000),
     };
 
-    await this.options.stores.verify.create(record);
-    await this.options.stores.phoneIndex.set(phone, sid, ttlSeconds);
+    await this.releasingOnError(releaseClaim, () => this.options.stores.verify.create(record));
+    const deleteRecord = () => this.tryCleanup('verification delete', () => this.options.stores.verify.delete(sid));
+
+    // The claim is renewed twice: after the record is written, so a start
+    // whose claim lapsed during slow store writes stops before it overwrites
+    // the index entry of the start that took it; and again right before the
+    // send, so it cannot send a second code. Losing it means another start
+    // holds it: this one removes only its own record and answers 429.
+    // TODO(#9): it leaves the index alone, which is wrong when its own index
+    // write landed after the winner's (a write stalled past the claim); a
+    // delete that only removes the entry while it still holds this sid fixes
+    // that. Returns when the renewed claim expires.
+    const renewClaim = async (cleanupOnError: () => Promise<void>): Promise<number> => {
+      const renewedAt = Date.now();
+      const [lostMs, renewErr] = await asyncHandler(this.claimCooldown(phone, claimSeconds, sid));
+      if (renewErr) {
+        await cleanupOnError();
+        await releaseClaim();
+        throw renewErr;
+      }
+      if (lostMs !== null && lostMs > 0) {
+        await deleteRecord();
+        throw await this.blockedByCooldown(phone, params.ip, channel, lostMs);
+      }
+      return renewedAt + claimSeconds * 1000;
+    };
+
+    await renewClaim(deleteRecord);
+    const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.set(phone, sid, ttlSeconds));
+    if (indexErr) {
+      await deleteRecord();
+      await releaseClaim();
+      throw indexErr;
+    }
 
     this.vlog(`start: persisted sid=${sid} attemptsMax=${maxAttempts} ttl=${ttlSeconds}s; dispatching code`);
     await this.audit({
@@ -232,6 +279,9 @@ export class VerifyService {
       ip: params.ip,
       channel,
     });
+    // A renewal that errors does not say who holds the claim, so the index,
+    // which another start may own by now, is left alone (TODO(#9)).
+    const claimExpiresAt = await renewClaim(deleteRecord);
     // A failed start removes the verification and answers 503. When a message
     // may have gone out (an attempt timed out, a provider marked its error
     // mayHaveSent, or the send succeeded and the bookkeeping after it failed),
@@ -240,7 +290,11 @@ export class VerifyService {
     // (#28). A retry after a definite send can still deliver a second code;
     // only the per-recipient rate limit counts it.
     const fail = (err: Error, mayHaveSent: boolean) =>
-      this.failStart({ sid, phone, ip: params.ip, channel, cooldownSeconds, kind: recipient.kind }, err, mayHaveSent);
+      this.failStart(
+        { sid, phone, ip: params.ip, channel, cooldownSeconds, kind: recipient.kind, claimExpiresAt, releaseClaim },
+        err,
+        mayHaveSent,
+      );
     const [provider, sendErr] = await asyncHandler(this.sendCode(recipient, code));
     // Only a chain failure with no timed-out or marked attempt is known not to
     // have sent; anything else (an error after a successful attempt) may have.
@@ -475,7 +529,9 @@ export class VerifyService {
   /**
    * Cleans up after a failed start and returns the 503. When a message may
    * have gone out, the cooldown is started before any cleanup step that can
-   * throw, and the 503 carries retryAfterMs when it was started.
+   * throw, and the 503 carries retryAfterMs: the cooldown when it was
+   * started, or else what is left of the claim, which still blocks a retry.
+   * When nothing went out, the claim is released so a retry can send.
    */
   private async failStart(
     ctx: {
@@ -485,6 +541,8 @@ export class VerifyService {
       channel: VerificationChannel;
       cooldownSeconds: number;
       kind: DeliveryKind;
+      claimExpiresAt: number;
+      releaseClaim: () => Promise<void>;
     },
     err: Error,
     mayHaveSent: boolean,
@@ -505,10 +563,54 @@ export class VerifyService {
         errorCode: err.message,
       });
     });
-    const retryAfterMs = ctx.cooldownSeconds * 1000;
-    return cooledDown && retryAfterMs > 0
-      ? new SmsDispatchFailedException(retryAfterMs)
-      : new SmsDispatchFailedException();
+    // Released last: a start that took the claim any earlier could have its
+    // index entry deleted by the cleanup above.
+    if (!mayHaveSent) await ctx.releaseClaim();
+    const retryAfterMs = this.retryAfterFailure(mayHaveSent, cooledDown, ctx.cooldownSeconds, ctx.claimExpiresAt);
+    return retryAfterMs > 0 ? new SmsDispatchFailedException(retryAfterMs) : new SmsDispatchFailedException();
+  }
+
+  /** 0 when a retry may send at once; otherwise how long the caller must wait. */
+  private retryAfterFailure(mayHaveSent: boolean, cooledDown: boolean, cooldownSeconds: number, claimExpiresAt: number): number {
+    if (!mayHaveSent) return 0;
+    if (cooledDown) return cooldownSeconds * 1000;
+    return Math.max(0, claimExpiresAt - Date.now());
+  }
+
+  /** 0 when this sid now holds the cooldown (or there is none); otherwise ms until it frees. */
+  private async claimCooldown(phone: string, claimSeconds: number, sid: string): Promise<number> {
+    if (claimSeconds === 0) return 0;
+    return this.options.stores.cooldown.claim(phone, claimSeconds, sid);
+  }
+
+  /** Records a start refused by an active cooldown and returns the 429. */
+  private async blockedByCooldown(
+    phone: string,
+    ip: string | undefined,
+    channel: VerificationChannel,
+    remainingMs: number,
+  ): Promise<CooldownActiveException> {
+    this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)} remainingMs=${remainingMs}`);
+    this.metrics.startsBlocked(BLOCK_REASON.Cooldown);
+    await this.audit({
+      type: 'rate_limited',
+      phoneRedacted: this.redact(phone),
+      ip,
+      channel,
+      outcome: 'cooldown',
+      meta: { retryAfterMs: remainingMs },
+    });
+    return new CooldownActiveException(remainingMs);
+  }
+
+  /** Runs `run`; if it throws, runs `cleanup` (which never throws) and rethrows the original. */
+  private async releasingOnError<T>(cleanup: () => Promise<void>, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      await cleanup();
+      throw err;
+    }
   }
 
   /** Runs one cleanup step after a failed start; a failure is logged, never thrown. */

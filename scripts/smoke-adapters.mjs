@@ -28,6 +28,7 @@ const MG_DB  = process.env.SMOKE_MG_DB  ?? 'verify_smoke';
 const REDIS_HOST = process.env.SMOKE_REDIS_HOST ?? 'localhost';
 const REDIS_PORT = Number(process.env.SMOKE_REDIS_PORT ?? 56379);
 
+const RUN = Date.now().toString(36);
 const assert = (cond, msg) => {
   if (!cond) { console.error('FAIL:', msg); process.exit(1); }
   console.log('  ok:', msg);
@@ -115,6 +116,33 @@ async function exerciseCooldownStore(name, cooldown) {
   await cooldown.start(`cd:${name}:k`, 60);
   const ms = await cooldown.remaining(`cd:${name}:k`);
   assert(ms > 0 && ms <= 60_000, `remaining in (0, 60000], got ${ms}`);
+
+  // claim and release (#13). Keys carry a per-run suffix so a rerun against
+  // the same database does not meet its own earlier claims.
+  const k = (suffix) => `cd:${name}:${RUN}:${suffix}`;
+  const many = await Promise.all(Array.from({ length: 10 }, (_, i) => cooldown.claim(k('race'), 60, `h${i}`)));
+  assert(many.filter((r) => r === 0).length === 1, `exactly one of 10 simultaneous claims wins, got ${many.join(',')}`);
+  assert(many.filter((r) => r > 0).length === 9, 'the other nine get the remaining ms');
+
+  assert((await cooldown.claim(k('renew'), 1, 'a')) === 0, 'claim a free key');
+  assert((await cooldown.claim(k('renew'), 60, 'a')) === 0, 'the same holder renews');
+  assert((await cooldown.remaining(k('renew'))) > 1_000, 'renewal extended the claim');
+  assert((await cooldown.claim(k('renew'), 60, 'b')) > 0, 'another holder is refused');
+
+  await cooldown.release(k('renew'), 'b');
+  assert((await cooldown.claim(k('renew'), 60, 'b')) > 0, 'release by another holder does nothing');
+  await cooldown.release(k('renew'), 'a');
+  assert((await cooldown.claim(k('renew'), 60, 'b')) === 0, 'release by the holder frees it');
+
+  await cooldown.claim(k('started'), 60, 'a');
+  await cooldown.start(k('started'), 60);
+  await cooldown.release(k('started'), 'a');
+  assert((await cooldown.remaining(k('started'))) > 0, 'release cannot end a cooldown started after the claim');
+  assert((await cooldown.claim(k('started'), 60, 'a')) > 0, 'a started cooldown is not claimable by the old holder');
+
+  assert((await cooldown.claim(k('expiry'), 1, 'a')) === 0, 'claim for 1 s');
+  await new Promise((r) => setTimeout(r, 1_200));
+  assert((await cooldown.claim(k('expiry'), 60, 'b')) === 0, 'an expired claim can be taken');
 }
 
 async function exercisePhoneIndexStore(name, phoneIndex) {
@@ -173,6 +201,16 @@ async function exerciseEmailFlow(name, stores) {
   assert((await service.check({ to: locked, code: '000000' })).state === 'canceled', 'wrong codes lock out');
   const again = await service.start({ to: locked, channel: 'email' }).catch((e) => e);
   assert(again?.code === 'COOLDOWN_ACTIVE', 'cooldown applies to the address');
+
+  // Simultaneous starts for one address: one sends, the others are refused (#13).
+  const raced = `race.${tag}.${RUN}@example.com`;
+  const before = sent.length;
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => service.start({ to: raced, channel: 'email' }).then(() => 'ok', (e) => e?.code ?? e?.message)),
+  );
+  assert(results.filter((r) => r === 'ok').length === 1, `one of 5 simultaneous starts succeeds, got ${results.join(',')}`);
+  assert(results.filter((r) => r === 'COOLDOWN_ACTIVE').length === 4, 'the other four get COOLDOWN_ACTIVE');
+  assert(sent.length - before === 1, 'one code sent');
 }
 
 async function main() {

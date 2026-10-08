@@ -260,13 +260,18 @@ describe('VerifyService, delivery limits', () => {
       expect(await stores.cooldown.remaining(PHONE)).toBeGreaterThan(0);
     });
 
-    it('still answers 503 when the cooldown cannot be written (case 5)', async () => {
+    it('still answers 503 when the cooldown cannot be written, with the claim as retryAfter (case 5, #13 case 19)', async () => {
       const only = provider('stuck', never);
       const service = build({ provider: only.p }, { attemptTimeoutMs: 20 });
       vi.spyOn(stores.cooldown, 'start').mockRejectedValue(new Error('store down'));
       const err = await failure(service.start({ to: PHONE }));
       expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
-      expect(err.extras.retryAfterMs).toBeUndefined();
+      // The claim is still in force, so the caller is told to wait for it: 40 s
+      // (the 10 s send window plus the 30 s margin) less the time the send took.
+      expect(err.extras.retryAfterMs).toBeGreaterThan(39_000);
+      expect(err.extras.retryAfterMs).toBeLessThanOrEqual(40_000);
+      expect((await failure(service.start({ to: PHONE }))).code).toBe(VerifyErrorCode.CooldownActive);
+      expect(only.p.send).toHaveBeenCalledTimes(1);
     });
 
     it('cools down when the send succeeded but its record could not be written (review P1)', async () => {
@@ -306,7 +311,8 @@ describe('VerifyService, delivery limits', () => {
       });
       const err = await failure(service.start({ to: PHONE }));
       expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
-      expect(err.extras.retryAfterMs).toBeUndefined();
+      expect(err.extras.retryAfterMs).toBeGreaterThan(39_000);
+      expect(err.extras.retryAfterMs).toBeLessThanOrEqual(40_000);
     });
 
     it('does not count a provider skipped for lack of budget as a timeout (review P5)', async () => {

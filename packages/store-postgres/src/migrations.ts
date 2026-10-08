@@ -92,4 +92,11 @@ export const MIGRATIONS: Migration[] = [
         ON verify_audit_log (type, ts DESC);
     `,
   },
+  {
+    version: 3,
+    description: 'cooldown holder, for the atomic claim taken before a send (#13)',
+    sql: `
+      ALTER TABLE verify_cooldowns ADD COLUMN IF NOT EXISTS holder TEXT;
+    `,
+  },
 ];
