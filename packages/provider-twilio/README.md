@@ -38,7 +38,7 @@ When any attempt may have been accepted by Twilio (HTTP 500, 502 or 504, a respo
 
 ## Peers
 
-- `@jadedm/nestjs-verify` 0.x
+- `@jadedm/nestjs-verify` within the range in `peerDependencies`
 - `twilio` 4.x or 5.x
 
 ## Consulting

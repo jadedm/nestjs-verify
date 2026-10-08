@@ -28,6 +28,9 @@ jobs:
       - run: pnpm check:exports
       - run: pnpm typecheck
       - run: pnpm test
+      # A 0.x minor must stay 0.x: fails if Changesets would plan any package
+      # at 1.0.0 (#10).
+      - run: pnpm check:release-plan
 
   packed:
     # Install the packed packages into a clean project outside the workspace,

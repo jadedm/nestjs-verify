@@ -62,7 +62,7 @@ A handful of things this codebase cares about. Knowing them up front saves revie
 * **Strategy interfaces over concrete classes.** SMS providers, verification stores, and abuse stores all live behind small interfaces with multiple swappable implementations. Adapters import only types from the core package and never reach into its internals.
 * **Atomic operations in stores.** `incrementAttempts` must be one round trip and must atomically transition status to `canceled` on lockout. The Postgres adapter uses `UPDATE ... RETURNING` with a `CASE` expression. The Mongo adapter uses a `findOneAndUpdate` with an aggregation pipeline. New adapters must hold the same contract.
 * **Peer deps stay external in tsup.** Never bundle `@nestjs/common`, `@nestjs/core`, `@nestjs/cache-manager`, `cache-manager`, `reflect-metadata`, `rxjs`, or any provider SDK. Bundling these causes class identity drift in the consumer at runtime, which we have already paid for once.
-* **Pre-1.0 minor bumps are breaking.** We are pre-1.0. A `minor` changeset means "users may need to update code." Use `patch` for true non-breaking changes only.
+* **Pre-1.0 minor bumps are breaking.** We are pre-1.0. A `minor` changeset means "users may need to update code." Use `patch` for true non-breaking changes only. A core `minor` must also widen each compatible adapter's core peer range to the new minor (for example `workspace:>=0.6.8 <0.8.0`) with a changeset for that adapter, so npm gets the new range; otherwise Changesets plans every package at 1.0.0. `pnpm check:release-plan` fails on either mistake and names the packages. Raise the lower bound by hand when an adapter starts relying on something newer in core.
 
 ## Releases
 

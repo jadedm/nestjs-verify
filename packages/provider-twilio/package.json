@@ -43,7 +43,7 @@
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
-    "@jadedm/nestjs-verify": "workspace:^",
+    "@jadedm/nestjs-verify": "workspace:>=0.6.8 <0.7.0",
     "twilio": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {

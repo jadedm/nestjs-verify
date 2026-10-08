@@ -99,8 +99,8 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
 - `scripts/smoke-adapters.mjs` encodes these invariants; a new adapter or store method gets cases
   there.
 - Adapters import from the `@jadedm/nestjs-verify` entry point only, never core internals, and almost
-  only types. The exception is `provider-gupshup`, which imports `asyncHandler` as a value. Core is a
-  `workspace:^` peer dependency of each adapter.
+  only types. The exception is `provider-gupshup`, which imports `asyncHandler` as a value. Core is a peer
+  dependency of each adapter, bounded to the core minors it is known to work with (Releases, below).
 
 ## Build rules
 
@@ -140,15 +140,29 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
 
 Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
-agent's shell) the publish fails with `EOTP`, so hand the command over. Every version through 0.6.5
-was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
+agent's shell) the publish fails with `EOTP`, so hand the command over. Every version so far
+(through postgres 0.6.12) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
 
-A core `minor` changeset would currently version every package 1.0.0 (#10), so changes ship as patch.
+Each adapter's core peer range names the core versions it works with: `workspace:>=0.6.8 <0.7.0`
+today. Changesets bumps a package at major when a release leaves its peer range, and in 0.x that is
+1.0.0; for core, twilio, postgres and ses the linked group then carries the others with it (#10). So
+the PR that adds a core `minor` changeset also widens the range (`<0.8.0`) of every adapter that works
+with the new core, with a changeset for each so npm gets the new range, and an adapter that needs code
+changes gets them in that release. Changesets leaves a range alone while releases stay inside it, so raise
+the lower bound by hand when an adapter starts relying on something newer in core. Because core,
+twilio, postgres and ses share one version line, a minor on one of those three without core would
+put core's next patch on that minor. The check refuses it while the ranges exclude that minor; once
+they admit it, core's next release counts as a new minor and must release the adapters with it. The experimental
+`onlyUpdatePeerDependentsWhenOutOfRange` flag in `.changeset/config.json` keeps an adapter unbumped
+while core stays inside its range; without it every core minor or major bumps every adapter at major
+(patches never do). `pnpm check:release-plan` (CI build job) fails if the pending changesets plan
+anything at 1.0.0, naming the ranges to widen, or move core to a new minor without releasing every
+adapter whose range admits it; probe changesets check the flag.
 
 The `linked` group in `.changeset/config.json` lists only core, twilio, postgres and ses. Gupshup,
-mongo and redis are outside it even though the README says all packages version in lockstep.
+mongo and redis version on their own.
 
 ## Workflow
 

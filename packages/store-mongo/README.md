@@ -69,7 +69,7 @@ new MongoAbuseStore({
 
 ## Peers
 
-- `@jadedm/nestjs-verify` 0.x
+- `@jadedm/nestjs-verify` within the range in `peerDependencies`
 - `mongodb` 5.x or 6.x
 
 Mongoose users can use this adapter directly. There is no separate `nestjs-verify-mongoose` package because Mongoose's `connection.db` exposes the same `Db` interface this adapter consumes.

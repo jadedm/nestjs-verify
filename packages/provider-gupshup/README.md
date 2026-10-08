@@ -69,7 +69,7 @@ VerifyModule.forRoot({
 
 ## Peers
 
-- `@jadedm/nestjs-verify` 0.4.x
+- `@jadedm/nestjs-verify` within the range in `peerDependencies`
 
 No SDK dependency. The adapter uses the global `fetch`. You can pass your own `fetchImpl` for tests or for environments that need a custom HTTP client.
 

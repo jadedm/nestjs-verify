@@ -58,7 +58,7 @@ pnpm add @jadedm/nestjs-verify-postgres     # or -mongo, or -redis for ephemeral
 | [`@jadedm/nestjs-verify-mongo`](./packages/store-mongo) | All five stores against Mongo. Atomic ops via aggregation pipelines, TTL indexes |
 | [`@jadedm/nestjs-verify-redis`](./packages/store-redis) | Three ephemeral stores against Redis. Atomic INCR via Lua. Pair with a durable store. |
 
-All packages publish independently to npm and version in lockstep via Changesets.
+All packages publish independently to npm and version via Changesets. Each adapter names the core versions it supports in its `peerDependencies`.
 
 ## Quickstart
 
@@ -173,7 +173,7 @@ The runnable example in `examples/basic-twilio-postgres` wires the core, the Twi
 
 ## Releases
 
-Each package versions independently via [Changesets](https://github.com/changesets/changesets) with a `linked` group keeping core and adapters in lockstep. The release workflow uses npm Trusted Publishing (OIDC); no NPM_TOKEN is needed in CI once trusted publishers are configured per package on npmjs.com.
+Each package versions independently via [Changesets](https://github.com/changesets/changesets). A `linked` group keeps core, Twilio, Postgres and SES on the same version when they release together; Gupshup, Mongo and Redis version on their own. The release workflow uses npm Trusted Publishing (OIDC); no NPM_TOKEN is needed in CI once trusted publishers are configured per package on npmjs.com.
 
 To propose a change:
 
