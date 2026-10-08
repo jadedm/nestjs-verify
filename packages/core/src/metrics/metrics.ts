@@ -189,28 +189,47 @@ declare const __VERIFY_ESM_REQUIRE__: ((id: string) => unknown) | undefined;
  * Loads the optional peer by trying each loader in turn rather than detecting
  * the environment: esbuild rewrites `typeof require` in the ESM build to its
  * own stub, which always looks like a function. The ESM build's helper works
- * in a plain ES module and fails harmlessly inside a bundle that rewrote
- * import.meta; require works in CommonJS and in bundlers. If all fail, a
- * "not found" error is reported in preference to the others.
+ * in a plain ES module; require works in CommonJS and in bundlers. Each
+ * loader also says how it fails when it cannot work in this environment at
+ * all, so that failure is set aside and the real error is reported.
  */
+type Loader = { load: () => unknown; unavailable: (err: unknown) => boolean };
+
+const errorText = (err: unknown) => {
+  const { code, message, stack } = (err ?? {}) as { code?: unknown; message?: unknown; stack?: unknown };
+  return { code, message: typeof message === 'string' ? message : '', stack: typeof stack === 'string' ? stack : '' };
+};
+
 const loadPromClient = (): PromModule => {
-  const loaders: (() => unknown)[] = [
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    () => require('prom-client'),
+  const loaders: Loader[] = [
+    {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      load: () => require('prom-client'),
+      // esbuild's ESM stub when no require exists (a plain ES module).
+      unavailable: (err) => /Dynamic require of .* is not supported/.test(errorText(err).message),
+    },
   ];
   if (typeof __VERIFY_ESM_REQUIRE__ === 'function') {
     const esmRequire = __VERIFY_ESM_REQUIRE__;
-    loaders.unshift(() => esmRequire('prom-client'));
+    loaders.unshift({
+      load: () => esmRequire('prom-client'),
+      // Inside a bundle: esbuild to CommonJS empties import.meta, and webpack
+      // turns the helper into an empty context or drops createRequire.
+      unavailable: (err) => {
+        const { code, message, stack } = errorText(err);
+        return code === 'ERR_INVALID_ARG_VALUE' || /webpack(Empty)?Context/.test(stack) || /is not a function/.test(message);
+      },
+    });
   }
-  const errors: unknown[] = [];
-  for (const load of loaders) {
+  const failures: { err: unknown; unavailable: boolean }[] = [];
+  for (const loader of loaders) {
     try {
-      return load() as PromModule;
+      return loader.load() as PromModule;
     } catch (err) {
-      errors.push(err);
+      failures.push({ err, unavailable: loader.unavailable(err) });
     }
   }
-  throw errors.find((e) => (e as { code?: unknown } | null)?.code === 'MODULE_NOT_FOUND') ?? errors[0];
+  throw (failures.find((f) => !f.unavailable) ?? failures[0]).err;
 };
 
 /**

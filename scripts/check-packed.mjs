@@ -184,7 +184,8 @@ const CORE = '@jadedm/nestjs-verify';
 // kind: 'esm' (dynamic import), 'cjs' (require), 'module' (a static import,
 // as an app file bundled by esbuild is written).
 const metricsProbe = (kind) => {
-  const body = `const r = createMetricsRecorder({ enabled: true }); console.log(r.getRegistry() ? 'registry' : 'noop')`;
+  // 'registry' only when a started verification is really counted.
+  const body = `const r = createMetricsRecorder({ enabled: true }); const reg = r.getRegistry(); if (!reg) { console.log('noop'); } else { r.startsTotal(); reg.metrics().then((t) => console.log(/verify_starts_total 1\\b/.test(t) ? 'registry' : 'registry-not-counting')); }`;
   if (kind === 'module') return `import { createMetricsRecorder } from '${CORE}';\n${body}`;
   const get = kind === 'esm' ? `(await import('${CORE}'))` : `require('${CORE}')`;
   return `const { createMetricsRecorder } = ${get}; ${body}`;
