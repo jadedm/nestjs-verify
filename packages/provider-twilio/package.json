@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify-twilio",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Twilio SMS provider adapter for @jadedm/nestjs-verify.",
   "keywords": [
     "nestjs",
