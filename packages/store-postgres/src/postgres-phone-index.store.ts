@@ -52,4 +52,8 @@ export class PostgresPhoneIndexStore implements PhoneIndexStore {
       [phone],
     );
   }
+
+  async deleteIfMatches(phone: string, sid: string): Promise<void> {
+    await this.pool.query(`DELETE FROM ${this.table} WHERE phone = $1 AND sid = $2`, [phone, sid]);
+  }
 }

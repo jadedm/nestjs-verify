@@ -151,6 +151,16 @@ async function exercisePhoneIndexStore(name, phoneIndex) {
   assert((await phoneIndex.get(`idx:${name}:+91`)) === 'vr_x', 'set/get round trip');
   await phoneIndex.delete(`idx:${name}:+91`);
   assert((await phoneIndex.get(`idx:${name}:+91`)) === null, 'delete clears entry');
+
+  // deleteIfMatches (#9): removes the entry only while it holds the sid.
+  const key = `idx:${name}:${RUN}:cmp`;
+  await phoneIndex.set(key, 'vr_a', 60);
+  await phoneIndex.deleteIfMatches(key, 'vr_b');
+  assert((await phoneIndex.get(key)) === 'vr_a', 'deleteIfMatches with another sid keeps the entry');
+  await phoneIndex.deleteIfMatches(key, 'vr_a');
+  assert((await phoneIndex.get(key)) === null, 'deleteIfMatches with the same sid removes it');
+  await phoneIndex.deleteIfMatches(key, 'vr_a');
+  assert((await phoneIndex.get(key)) === null, 'deleteIfMatches on a missing entry is a no-op');
 }
 
 async function exerciseAuditSink(name, audit) {

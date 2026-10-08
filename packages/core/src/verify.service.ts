@@ -126,6 +126,10 @@ export class VerifyService {
     if (missing.length > 0) {
       throw new Error(`stores.cooldown must implement ${missing.join(' and ')} (required since 0.7.0, #13).`);
     }
+    const phoneIndex = options.stores.phoneIndex as unknown as Record<string, unknown>;
+    if (typeof phoneIndex.deleteIfMatches !== 'function') {
+      throw new Error('stores.phoneIndex must implement deleteIfMatches (required since 0.7.0, #9).');
+    }
     this.metrics = createMetricsRecorder({
       enabled: options.observability?.metrics?.enabled,
       registry: options.observability?.metrics?.registry,
@@ -238,16 +242,23 @@ export class VerifyService {
 
     await this.releasingOnError(releaseClaim, () => this.options.stores.verify.create(record));
     const deleteRecord = () => this.tryCleanup('verification delete', () => this.options.stores.verify.delete(sid));
+    // Removes this start's index entry only if it still holds this sid, so it
+    // can never remove the entry of a newer verification (#9).
+    const deleteOwnIndex = () =>
+      this.tryCleanup('index delete', () => this.options.stores.phoneIndex.deleteIfMatches(phone, sid));
+    const deleteOwnRecordAndIndex = async () => {
+      await deleteRecord();
+      await deleteOwnIndex();
+    };
 
     // The claim is renewed twice: after the record is written, so a start
     // whose claim lapsed during slow store writes stops before it overwrites
     // the index entry of the start that took it; and again right before the
     // send, so it cannot send a second code. Losing it means another start
-    // holds it: this one removes only its own record and answers 429.
-    // TODO(#9): it leaves the index alone, which is wrong when its own index
-    // write landed after the winner's (a write stalled past the claim); a
-    // delete that only removes the entry while it still holds this sid fixes
-    // that. Returns when the renewed claim expires.
+    // holds it: this one removes its own record, and its index entry if the
+    // index still holds it, and answers 429. (A stalled index write that
+    // landed over the winner's entry has already replaced it; #82.)
+    // Returns when the renewed claim expires.
     const renewClaim = async (cleanupOnError: () => Promise<void>): Promise<number> => {
       const renewedAt = Date.now();
       const [lostMs, renewErr] = await asyncHandler(this.claimCooldown(phone, claimSeconds, sid));
@@ -257,16 +268,19 @@ export class VerifyService {
         throw renewErr;
       }
       if (lostMs !== null && lostMs > 0) {
-        await deleteRecord();
+        await deleteOwnRecordAndIndex();
         throw await this.blockedByCooldown(phone, params.ip, channel, lostMs);
       }
       return renewedAt + claimSeconds * 1000;
     };
 
     await renewClaim(deleteRecord);
-    const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.set(phone, sid, ttlSeconds));
+    // The entry lives as long as the record, not a full TTL from now.
+    const indexTtlSeconds = Math.max(1, Math.ceil((record.expiresAt.getTime() - Date.now()) / 1000));
+    const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.set(phone, sid, indexTtlSeconds));
     if (indexErr) {
-      await deleteRecord();
+      // The write may have been saved before it reported the error.
+      await deleteOwnRecordAndIndex();
       await releaseClaim();
       throw indexErr;
     }
@@ -279,9 +293,7 @@ export class VerifyService {
       ip: params.ip,
       channel,
     });
-    // A renewal that errors does not say who holds the claim, so the index,
-    // which another start may own by now, is left alone (TODO(#9)).
-    const claimExpiresAt = await renewClaim(deleteRecord);
+    const claimExpiresAt = await renewClaim(deleteOwnRecordAndIndex);
     // A failed start removes the verification and answers 503. When a message
     // may have gone out (an attempt timed out, a provider marked its error
     // mayHaveSent, or the send succeeded and the bookkeeping after it failed),
@@ -349,6 +361,7 @@ export class VerifyService {
 
     const record = await this.options.stores.verify.get(sid);
     if (!record) {
+      await this.dropIndexEntry(phone, sid, 'a missing verification');
       this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
       this.metrics.checkDuration((Date.now() - checkStart) / 1000);
       throw new NoPendingVerificationException();
@@ -359,11 +372,13 @@ export class VerifyService {
     // finished: reporting approved here, without comparing the code, would
     // let any code through while the recipient index still points at it.
     if (record.status !== 'pending') {
+      await this.dropIndexEntry(phone, sid, 'a finished verification');
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
     if (record.expiresAt.getTime() <= Date.now()) {
       await this.options.stores.verify.markStatus(sid, 'expired');
+      await this.dropIndexEntry(phone, sid, 'an expired verification');
       this.metrics.checksTotal(CHECK_OUTCOME.Expired);
       this.metrics.checkDuration((Date.now() - checkStart) / 1000);
       await this.audit({
@@ -388,8 +403,7 @@ export class VerifyService {
       // The approval is already committed. A failed index cleanup must not
       // turn it into an error: later checks of this record answer canceled,
       // so a stale index entry grants nothing.
-      const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.delete(phone));
-      if (indexErr) this.log.warn(`check: index cleanup failed for sid=${sid}: ${indexErr.message}`);
+      await this.dropIndexEntry(phone, sid, `sid=${sid}`);
       this.metrics.checksTotal(
         transitioned ? CHECK_OUTCOME.Approved : CHECK_OUTCOME.LockedOut,
       );
@@ -417,7 +431,7 @@ export class VerifyService {
 
     if (outcome === 'locked-out') {
       this.vlog(`check: locked out sid=${sid} after exhausting attempts`);
-      await this.options.stores.phoneIndex.delete(phone);
+      await this.dropIndexEntry(phone, sid, 'a locked-out verification');
       this.metrics.checksTotal(CHECK_OUTCOME.LockedOut);
       this.metrics.checkDuration((Date.now() - checkStart) / 1000);
       await this.audit({
@@ -551,7 +565,7 @@ export class VerifyService {
     // Each cleanup step runs even if an earlier one fails, and none of them
     // turns the answer into a 500: the caller still gets the documented 503.
     await this.tryCleanup('verification delete', () => this.options.stores.verify.delete(ctx.sid));
-    await this.tryCleanup('index delete', () => this.options.stores.phoneIndex.delete(ctx.phone));
+    await this.tryCleanup('index delete', () => this.options.stores.phoneIndex.deleteIfMatches(ctx.phone, ctx.sid));
     await this.tryCleanup('failure record', async () => {
       await this.options.stores.abuse?.recordSendAttempt({
         sid: ctx.sid,
@@ -611,6 +625,20 @@ export class VerifyService {
       await cleanup();
       throw err;
     }
+  }
+
+  /**
+   * After `check` has decided a verification's outcome, removes the
+   * recipient's index entry if it still holds `sid`. The outcome is already
+   * stored, so a failure is logged, never thrown; the entry points at a
+   * finished record and expires with it.
+   */
+  private async dropIndexEntry(phone: string, sid: string, what: string): Promise<void> {
+    // Deferred so a store that throws synchronously is caught too.
+    const [, err] = await asyncHandler(
+      Promise.resolve().then(() => this.options.stores.phoneIndex.deleteIfMatches(phone, sid)),
+    );
+    if (err) this.log.warn(`check: index cleanup for ${what} did not complete: ${err.message}`);
   }
 
   /** Runs one cleanup step after a failed start; a failure is logged, never thrown. */
