@@ -460,6 +460,35 @@ describe('VerifyService, delivery limits', () => {
         expect(err.extras.retryAfterMs).toBe(30_000);
       });
 
+      it('starts no cooldown when every failure was outright, when false (review)', async () => {
+        const first = provider('first', fails);
+        const second = provider('second', fails);
+        const service = build({ provider: first.p, fallbacks: [second.p] }, { fallbackAfterUncertain: false });
+        const err = await failure(service.start({ to: PHONE }));
+        expect(second.p.send).toHaveBeenCalledTimes(1);
+        expect(err.extras.retryAfterMs).toBeUndefined();
+        expect(await stores.cooldown.remaining(PHONE)).toBe(0);
+      });
+
+      it('stops the chain after a synchronously thrown marked error, when false (review)', async () => {
+        const syncMarked: SmsProvider = {
+          name: 'sync',
+          send: () => {
+            throw Object.assign(new Error('HTTP 502'), { mayHaveSent: true });
+          },
+        };
+        const backup = provider('backup', ok);
+        const service = build({ provider: syncMarked, fallbacks: [backup.p] }, { fallbackAfterUncertain: false });
+        const err = await failure(service.start({ to: PHONE }));
+        expect(backup.p.send).not.toHaveBeenCalled();
+        expect(err.extras.retryAfterMs).toBe(30_000);
+      });
+
+      it.each(['false', 0, 'true'])('refuses a non-boolean value %s at startup (review)', (bad) => {
+        const only = provider('x', ok);
+        expect(() => build({ provider: only.p }, { fallbackAfterUncertain: bad as unknown as boolean })).toThrow(/must be a boolean/);
+      });
+
       it('logs why the chain stopped (case 6)', async () => {
         const primary = provider('primary', marked);
         const backup = provider('backup', ok);
