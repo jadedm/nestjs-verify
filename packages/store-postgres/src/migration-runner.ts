@@ -3,7 +3,7 @@ import { MIGRATIONS, PACKAGE_NAME } from './migrations.js';
 
 /**
  * Stable advisory-lock key. Chosen by hashing the package name to fit in
- * a 32-bit signed int, the type pg_try_advisory_lock takes when called
+ * a 32-bit signed int, the type pg_advisory_lock takes when called
  * with a single argument.
  */
 const ADVISORY_LOCK_KEY = 0x4a564d50; // 'JVMP' as ascii, ~ 1247563600
@@ -23,7 +23,7 @@ export interface RunMigrationsOptions {
 
 /**
  * Idempotent migration runner. Safe to call from multiple racing application
- * instances thanks to pg_try_advisory_lock. Each migration is wrapped in a
+ * instances thanks to pg_advisory_lock, which makes later callers wait. Each migration is wrapped in a
  * transaction; on failure, the entire migration is rolled back and the
  * version counter is not advanced.
  */
