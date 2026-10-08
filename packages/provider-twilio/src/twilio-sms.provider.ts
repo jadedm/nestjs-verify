@@ -18,6 +18,17 @@ export interface TwilioSmsProviderOptions {
   maxRetries?: number;
   /** Base delay in ms for exponential backoff. Default 250. */
   retryBaseMs?: number;
+  /**
+   * Retry an attempt that may have been accepted (HTTP 500, 502 or 504, a
+   * response broken after its headers, or any network error other than a
+   * refused connection, a DNS failure or an unreachable host or network).
+   * Default true: better odds of delivery, but a retry can deliver the same
+   * code a second time. With false, such a failure is thrown at once, marked
+   * mayHaveSent, and the user's retry waits for the cooldown. Failures known
+   * not to have sent (429, 503, refused connection, DNS) are retried either way.
+   * The core may still try the next provider in `fallbacks` (#51).
+   */
+  retryAfterUncertain?: boolean;
 }
 
 /**
@@ -45,10 +56,19 @@ const mayHaveBeenAccepted = (err: unknown): boolean => {
   return !(typeof code === 'string' && NEVER_CONNECTED.has(code));
 };
 
-/** Marks the error the way the core reads it (`mayHaveSent: true`), when any attempt was uncertain. */
+/**
+ * Marks the error the way the core reads it (`mayHaveSent: true`), when any
+ * attempt was uncertain. An error that cannot take a new property (frozen)
+ * is wrapped, keeping its message, name, status and code, with the original
+ * as `cause`, so the mark and the core's cooldown are never lost.
+ */
 const markIfUncertain = (err: unknown, uncertain: boolean): unknown => {
-  if (!uncertain || typeof err !== 'object' || err === null || !Object.isExtensible(err)) return err;
-  return Object.assign(err, { mayHaveSent: true });
+  if (!uncertain || typeof err !== 'object' || err === null) return err;
+  if (Object.isExtensible(err)) return Object.assign(err, { mayHaveSent: true });
+  const { message, name, status, code } = err as { message?: unknown; name?: unknown; status?: unknown; code?: unknown };
+  const wrapped = new Error(typeof message === 'string' ? message : String(err), { cause: err });
+  if (typeof name === 'string') wrapped.name = name;
+  return Object.assign(wrapped, { status, code, mayHaveSent: true });
 };
 
 export class TwilioSmsProvider implements SmsProvider {
@@ -57,12 +77,14 @@ export class TwilioSmsProvider implements SmsProvider {
   private readonly from: string;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
+  private readonly retryAfterUncertain: boolean;
 
   constructor(opts: TwilioSmsProviderOptions) {
     this.client = new twilio.Twilio(opts.accountSid, opts.authToken);
     this.from = opts.from;
     this.maxRetries = opts.maxRetries ?? 2;
     this.retryBaseMs = opts.retryBaseMs ?? 250;
+    this.retryAfterUncertain = opts.retryAfterUncertain ?? true;
   }
 
   /**
@@ -93,9 +115,11 @@ export class TwilioSmsProvider implements SmsProvider {
         return { providerMessageId: message.sid, provider: this.name };
       } catch (err) {
         lastErr = err;
-        uncertain = uncertain || mayHaveBeenAccepted(err);
-        const status = (err as { status?: number }).status;
+        const attemptUncertain = mayHaveBeenAccepted(err);
+        uncertain = uncertain || attemptUncertain;
+        const status = (err as { status?: number } | null)?.status;
         if (status && !TRANSIENT_STATUS_CODES.has(status)) throw markIfUncertain(err, uncertain);
+        if (attemptUncertain && !this.retryAfterUncertain) break;
         if (attempt === this.maxRetries) break;
         await this.sleep(this.retryBaseMs * 2 ** attempt, signal);
         attempt++;

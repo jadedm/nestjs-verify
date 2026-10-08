@@ -256,3 +256,70 @@ describe('GupshupSmsProvider, may-have-sent mark (#33)', () => {
     expect((await send(afterTimeout))?.mayHaveSent).toBe(true);
   });
 });
+
+describe('GupshupSmsProvider, retryAfterUncertain (#43)', () => {
+  const provider = (fetchImpl: typeof fetch, retryAfterUncertain?: boolean) =>
+    new GupshupSmsProvider({ auth: { mode: 'apikey', apiKey: 'key' }, sender: 'JADEDM', fetchImpl, maxRetries: 2, retryBaseMs: 1, retryAfterUncertain });
+  const send = (p: GupshupSmsProvider) =>
+    p.send({ to: '+919999', body: 'code' }).then(
+      (r) => r,
+      (e: { mayHaveSent?: unknown; name?: string }) => e,
+    );
+
+  it('stops after one uncertain attempt when false (case 5)', async () => {
+    const { fn, calls } = mockFetch([{ status: 504 }]);
+    const err = (await send(provider(fn, false))) as { mayHaveSent?: unknown; name?: string };
+    expect(calls).toHaveLength(1);
+    expect(err.name).toBe('GupshupTransientError');
+    expect(err.mayHaveSent).toBe(true);
+  });
+
+  it('stops after a body that could not be read when false (case 6)', async () => {
+    const unreadable = vi.fn(async () =>
+      ({ status: 200, text: async () => { throw new Error('terminated'); } }) as unknown as Response,
+    ) as unknown as typeof fetch;
+    const err = (await send(provider(unreadable, false))) as { mayHaveSent?: unknown; name?: string };
+    expect(unreadable).toHaveBeenCalledTimes(1);
+    expect(err.name).toBe('GupshupTransientError');
+    expect(err.mayHaveSent).toBe(true);
+  });
+
+  it('still retries a refused connection when false (review)', async () => {
+    let calls = 0;
+    const refusedThenOk = (async () => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) });
+      return new Response('success | sent | 1709-OK', { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await send(provider(refusedThenOk, false))).toEqual({ providerMessageId: '1709-OK', provider: 'gupshup' });
+    expect(calls).toBe(2);
+  });
+
+  it('rejects with the abort reason when the request is aborted in flight, when false (Codex, PR #50)', async () => {
+    const controller = new AbortController();
+    const reason = new Error('core gave up');
+    const hanging = ((_: unknown, init?: RequestInit) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      })) as unknown as typeof fetch;
+    setTimeout(() => controller.abort(reason), 10);
+    const p = provider(hanging, false);
+    const err = await p.send({ to: '+919999', body: 'code' }, { signal: controller.signal }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBe(reason);
+  });
+
+  it('still retries a 503 when false (case 7)', async () => {
+    const { fn, calls } = mockFetch([{ status: 503 }, { body: 'success | sent | 1709-XYZ' }]);
+    expect(await send(provider(fn, false))).toEqual({ providerMessageId: '1709-XYZ', provider: 'gupshup' });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('keeps retrying uncertain failures by default (case 8)', async () => {
+    const { fn, calls } = mockFetch([{ status: 504 }]);
+    await send(provider(fn));
+    expect(calls).toHaveLength(3);
+  });
+});

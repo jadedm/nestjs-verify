@@ -155,14 +155,60 @@ describe('TwilioSmsProvider, may-have-sent mark (#33)', () => {
     expect((await thrown(failWith(netErr('ENETUNREACH'))))?.mayHaveSent).toBeUndefined();
   });
 
-  it('leaves a frozen error alone instead of throwing while marking it (review)', async () => {
+  it('wraps a frozen error so the mark is kept (review, PR #50)', async () => {
     const frozen = Object.freeze(Object.assign(new Error('HTTP 504'), { status: 504 }));
-    const err = await thrown(failWith(frozen));
-    expect(err).toBe(frozen);
-    expect(err?.mayHaveSent).toBeUndefined();
+    const err = (await thrown(failWith(frozen))) as { mayHaveSent?: unknown; status?: number; message?: string; cause?: unknown };
+    expect(err).not.toBe(frozen);
+    expect(err.cause).toBe(frozen);
+    expect(err.mayHaveSent).toBe(true);
+    expect(err.status).toBe(504);
+    expect(err.message).toBe('HTTP 504');
   });
 
   it('does not mark a 400 on its own (case 9)', async () => {
     expect((await thrown(failWith(httpErr(400))))?.mayHaveSent).toBeUndefined();
+  });
+});
+
+describe('TwilioSmsProvider, retryAfterUncertain (#43)', () => {
+  const provider = (retryAfterUncertain?: boolean) =>
+    new TwilioSmsProvider({ accountSid: 'ACxxxxx', authToken: 'token', from: '+15555555555', maxRetries: 2, retryBaseMs: 1, retryAfterUncertain });
+  const failing = (...errors: object[]) => {
+    let i = 0;
+    return vi.fn(async () => {
+      const err = errors[Math.min(i++, errors.length - 1)];
+      if (err instanceof Error) throw err;
+      return err;
+    });
+  };
+  const http = (status: number) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const send = (p: TwilioSmsProvider) =>
+    p.send({ to: '+14155552671', body: 'hi' }).then(
+      (r) => r,
+      (e: { mayHaveSent?: unknown }) => e,
+    );
+
+  it('stops after one uncertain attempt when false (case 1)', async () => {
+    const original = http(504);
+    const create = failing(original);
+    const err = await send(patchMessages(provider(false), create));
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(err).toBe(original);
+    expect((err as { mayHaveSent?: unknown }).mayHaveSent).toBe(true);
+  });
+
+  it('still retries failures known not to have sent when false (cases 2, 3)', async () => {
+    const busy = failing(http(503));
+    await send(patchMessages(provider(false), busy));
+    expect(busy).toHaveBeenCalledTimes(3);
+    const refusedThenOk = failing(Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }), { sid: 'SM1' });
+    expect(await send(patchMessages(provider(false), refusedThenOk))).toEqual({ providerMessageId: 'SM1', provider: 'twilio' });
+    expect(refusedThenOk).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps retrying uncertain failures by default (case 4)', async () => {
+    const create = failing(http(504));
+    await send(patchMessages(provider(), create));
+    expect(create).toHaveBeenCalledTimes(3);
   });
 });

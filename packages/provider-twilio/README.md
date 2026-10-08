@@ -30,11 +30,11 @@ If `from` starts with `MG`, the adapter calls Twilio with `messagingServiceSid` 
 
 ## Retry behavior
 
-Transient errors (HTTP 429 and 5xx) are retried with exponential backoff: `retryBaseMs * 2^attempt`. Default budget is two retries.
+Transient errors (HTTP 429 and 5xx) are retried with exponential backoff: `retryBaseMs * 2^attempt`. Default budget is two retries. With `retryAfterUncertain: false` (below), 500, 502 and 504 are not retried.
 
 Terminal errors (invalid number, blocked recipient, geo permission, anything that is not 429/5xx) are not retried and are surfaced to the caller.
 
-When any attempt may have been accepted by Twilio (HTTP 500, 502 or 504, a response that broke after its headers, or a network error other than those listed below), the thrown error carries `mayHaveSent: true`, even if a later attempt failed cleanly. `@jadedm/nestjs-verify` then starts the recipient's cooldown so an immediate retry does not send a second message. A refused connection, a DNS failure, an unreachable host or network, 429 and 503 are not marked; any other network error is marked, which errs toward a cooldown. The adapter's own retries still run after an uncertain attempt and can deliver the same code again (#43).
+When any attempt may have been accepted by Twilio (HTTP 500, 502 or 504, a response that broke after its headers, or a network error other than those listed below), the thrown error carries `mayHaveSent: true`, even if a later attempt failed cleanly. `@jadedm/nestjs-verify` then starts the recipient's cooldown so an immediate retry does not send a second message. A refused connection, a DNS failure, an unreachable host or network, 429 and 503 are not marked; any other network error is marked, which errs toward a cooldown. The adapter's own retries still run after an uncertain attempt, so a retry can deliver the same code again. To stop that, pass `retryAfterUncertain: false`: an uncertain failure is then thrown at once, the core starts the cooldown, and the user retries after it. Failures known not to have sent (429, 503, refused connection, DNS) are retried either way. If `fallbacks` are configured, the core still tries the next provider after such a failure, which can also deliver the same code; see #51.
 
 ## Peers
 
