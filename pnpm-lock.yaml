@@ -167,13 +167,14 @@ importers:
         version: 6.21.0
 
   packages/store-postgres:
+    dependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.20.0
     devDependencies:
       '@jadedm/nestjs-verify':
         specifier: workspace:*
         version: link:../core
-      '@types/pg':
-        specifier: ^8.11.0
-        version: 8.20.0
       pg:
         specifier: ^8.11.0
         version: 8.21.0
