@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify-gupshup
 
+## 0.6.5
+
+### Patch Changes
+
+- f22a978: Accepts `@jadedm/nestjs-verify` 0.7 as a peer (`>=0.6.8 <0.8.0`).
+
 ## 0.6.4
 
 ### Patch Changes
