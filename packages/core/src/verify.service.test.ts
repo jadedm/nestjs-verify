@@ -251,7 +251,7 @@ describe('VerifyService, email channel', () => {
   it('reports approved only to the check that approved, never to a later check with any code', async () => {
     await service.start({ to: 'a@example.com', channel: 'email' });
     // Keep the index pointing at the approved record, as a failed delete would.
-    vi.spyOn(stores.phoneIndex, 'delete').mockResolvedValue(undefined);
+    vi.spyOn(stores.phoneIndex, 'deleteIfMatches').mockResolvedValue(undefined);
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
     expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('canceled');
@@ -259,7 +259,7 @@ describe('VerifyService, email channel', () => {
 
   it('still reports approved when the index cleanup fails, and nothing after it does', async () => {
     await service.start({ to: 'a@example.com', channel: 'email' });
-    vi.spyOn(stores.phoneIndex, 'delete').mockRejectedValue(new Error('store down'));
+    vi.spyOn(stores.phoneIndex, 'deleteIfMatches').mockRejectedValue(new Error('store down'));
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
     expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
   });

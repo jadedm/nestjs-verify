@@ -28,4 +28,9 @@ export class MemoryPhoneIndexStore implements PhoneIndexStore {
   async delete(phone: string): Promise<void> {
     this.entries.delete(phone);
   }
+
+  async deleteIfMatches(phone: string, sid: string): Promise<void> {
+    if (this.entries.get(phone)?.sid !== sid) return;
+    this.entries.delete(phone);
+  }
 }

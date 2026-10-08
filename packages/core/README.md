@@ -99,7 +99,7 @@ The architectural shape of 0.3.0 onward. Every piece of state lives behind a sto
 | `AbuseStore` | Send-attempt history for IP/phone velocity heuristics. Optional. | Postgres, Mongo |
 | `RateLimitStore` | Fixed-window counter per phone and per IP. Atomic. | Postgres, Mongo, Redis |
 | `CooldownStore` | Per-phone cooldown between sends. `claim` must decide the holder atomically, so of simultaneous starts for one phone only one sends; `release` ends a claim only for its holder. | Postgres, Mongo, Redis |
-| `PhoneIndexStore` | Phone -> sid lookup so check() does not need the sid | Postgres, Mongo, Redis |
+| `PhoneIndexStore` | Phone -> sid lookup so check() does not need the sid. `deleteIfMatches` removes an entry only while it holds the given sid. | Postgres, Mongo, Redis |
 
 You can use a single backend for all five, or split durable vs ephemeral (Postgres for `verify` and `abuse`, Redis for the other three) for speed.
 

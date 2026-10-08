@@ -100,6 +100,9 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
   reaching `maxAttempts`, flips status to `canceled` in the same operation. Postgres does this with
   `UPDATE ... RETURNING` and a `CASE`; Mongo with `findOneAndUpdate` and an aggregation pipeline.
 - `markStatus` only transitions out of `pending` and returns false if the record was no longer pending.
+- `CooldownStore.claim` decides the holder in one atomic operation and renews for the same holder;
+  `release` and `PhoneIndexStore.deleteIfMatches` remove only what the given holder or sid still owns
+  (#13, #9). The service never deletes an index entry with the unconditional `delete`.
 - `scripts/smoke-adapters.mjs` encodes these invariants; a new adapter or store method gets cases
   there.
 - Adapters import from the `@jadedm/nestjs-verify` entry point only, never core internals, and almost

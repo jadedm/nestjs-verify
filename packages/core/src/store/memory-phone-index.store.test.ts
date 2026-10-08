@@ -33,3 +33,16 @@ describe('MemoryPhoneIndexStore', () => {
     expect(await store.get('+91999')).toBeNull();
   });
 });
+
+describe('MemoryPhoneIndexStore.deleteIfMatches (#9)', () => {
+  it('removes the entry only while it holds the sid', async () => {
+    const store = new MemoryPhoneIndexStore();
+    await store.set('+1', 'vr_a', 60);
+    await store.deleteIfMatches('+1', 'vr_b');
+    expect(await store.get('+1')).toBe('vr_a');
+    await store.deleteIfMatches('+1', 'vr_a');
+    expect(await store.get('+1')).toBeNull();
+    await store.deleteIfMatches('+1', 'vr_a');
+    expect(await store.get('+1')).toBeNull();
+  });
+});

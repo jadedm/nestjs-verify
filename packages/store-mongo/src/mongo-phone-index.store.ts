@@ -57,6 +57,10 @@ export class MongoPhoneIndexStore implements PhoneIndexStore {
     await this.col.deleteOne({ _id: phone });
   }
 
+  async deleteIfMatches(phone: string, sid: string): Promise<void> {
+    await this.col.deleteOne({ _id: phone, sid });
+  }
+
   async close(): Promise<void> {
     await this.ownedClient?.close();
   }
