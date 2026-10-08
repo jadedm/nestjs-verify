@@ -10,49 +10,63 @@ The adapter depends on `@types/pg` (any 8.x), so its own `Pool` and `PoolConfig`
 
 ## Usage
 
-```ts
-import { VerifyModule } from '@jadedm/nestjs-verify';
-import {
-  PostgresVerifyStore,
-  PostgresAbuseStore,
-} from '@jadedm/nestjs-verify-postgres';
+`createPostgresStores` builds all five stores and the audit sink on one connection pool and runs the schema migrations before returning.
 
-VerifyModule.forRootAsync({
-  useFactory: async () => {
-    const verify = new PostgresVerifyStore({
-      connectionString: process.env.DATABASE_URL!,
-    });
-    const abuse = new PostgresAbuseStore({
-      connectionString: process.env.DATABASE_URL!,
-    });
-    await verify.ensureSchema();
-    await abuse.ensureSchema();
-    return {
-      sms: { /* ... */ },
-      stores: { verify, abuse },
-    };
-  },
-});
+```ts
+import { Module, OnApplicationShutdown } from '@nestjs/common';
+import { VerifyModule } from '@jadedm/nestjs-verify';
+import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
+import type { Pool } from 'pg';
+
+let pool: Pool | undefined;
+
+@Module({
+  imports: [
+    VerifyModule.forRootAsync({
+      useFactory: async () => {
+        const stores = await createPostgresStores({ connectionString: process.env.DATABASE_URL! });
+        pool = stores.pool;
+        return {
+          sms: { provider: yourSmsProvider }, // TwilioSmsProvider, GupshupSmsProvider or your own
+          stores,
+        };
+      },
+    }),
+  ],
+})
+export class AppModule implements OnApplicationShutdown {
+  async onApplicationShutdown() {
+    await pool?.end();
+  }
+}
 ```
 
-`ensureSchema()` is idempotent and creates the required tables and indexes if they are not already present. You can also run the DDL yourself; see the exported `VERIFICATIONS_TABLE_DDL` and `ABUSE_TABLE_DDL` constants.
+Pass `pool` instead of `connectionString` to share an existing `pg.Pool`, or `poolConfig` for full `pg` options. The returned object also carries `pool`, so the app can close it on shutdown as above.
+
+## Schema and migrations
+
+The first call to `createPostgresStores` creates the tables (`verifications`, `verify_abuse_log`, `verify_rate_limits`, `verify_cooldowns`, `verify_phone_index`, `verify_audit_log`) and records the applied version in `verify_schema_versions`. Later calls apply only what is missing, so restarts are cheap. Migrations run under a Postgres advisory lock, so several instances starting at once do not race, and each migration runs in a transaction.
+
+To manage the schema yourself, pass `skipSchemaSetup: true`: no DDL runs, and startup fails if the database is not at the version this package expects. The SQL is exported as `MIGRATIONS`, and `runMigrations(pool)` applies it from your own tooling.
 
 ## Atomicity
 
 `incrementAttempts` uses a single `UPDATE ... RETURNING` with a conditional `CASE` to increment the counter and conditionally transition the row to `canceled` when `max_attempts` is reached. One round trip, no race.
 
-## Construction options
+## Individual stores
+
+Each store can be built on its own, for example to put the short-lived stores in Redis:
 
 ```ts
-new PostgresVerifyStore({
-  connectionString: 'postgres://...',
-  // or
-  poolConfig: { /* pg.PoolConfig */ },
-  // or
-  pool: existingPool,
-  tableName: 'verifications',  // default
+import { PostgresVerifyStore } from '@jadedm/nestjs-verify-postgres';
+
+const verify = new PostgresVerifyStore({
+  connectionString: 'postgres://...', // or poolConfig: { ... }, or pool: existingPool
+  tableName: 'verifications',          // default
 });
 ```
+
+A store built this way runs no migrations; call `runMigrations(pool)` first. `tableName` changes only the queries, not what the migrations create, so a custom name needs a table you create from the `MIGRATIONS` SQL.
 
 ## Peers
 
