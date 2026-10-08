@@ -42,7 +42,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.6.0"
   },
   "peerDependencies": {
     "@jadedm/nestjs-verify": "workspace:^",

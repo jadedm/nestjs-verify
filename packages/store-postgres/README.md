@@ -6,7 +6,7 @@ Postgres store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/packa
 pnpm add @jadedm/nestjs-verify-postgres pg
 ```
 
-The adapter depends on `@types/pg`, so `Pool` and `PoolConfig` are typed without installing anything else.
+The adapter depends on `@types/pg` (any 8.x), so its own `Pool` and `PoolConfig` types need nothing else installed; an app that already has `@types/pg` 8.x shares that copy. If your own code imports from `pg` (for example to pass `pool: existingPool`), install `@types/pg` in your app as usual: pnpm does not let an app import a dependency it has not declared.
 
 ## Usage
 
