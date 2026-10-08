@@ -132,6 +132,8 @@ try {
   process.exit(1);
 }
 const nodeMajor = process.versions.node.split('.')[0];
+// @types/pg matches the documented setup: the postgres adapter's README tells
+// users to install it, since its declarations use pg's types (#49).
 const toolSpecs = ['typescript@5', `@types/node@${nodeMajor}`, '@types/pg@8'];
 
 // --- static dependency check: bare specifiers in the built files
