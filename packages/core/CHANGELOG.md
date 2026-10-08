@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify
 
+## 0.6.8
+
+### Patch Changes
+
+- bf29dc0: Metrics work in ES module apps. The optional prom-client peer is loaded with `require()`, which does not exist in an ES module, so with `observability.metrics.enabled: true` an ESM app silently got no metrics and a warning wrongly saying prom-client was not installed. The ESM build now carries a helper that makes a `require` from the package at the moment prom-client is loaded, and the loader tries it before plain `require`. Nothing runs at load, so apps bundled with esbuild or webpack load and record metrics as before; a bundler that inlines the ESM build may print one new build warning about the helper (webpack: "the request of a dependency is an expression"). CommonJS apps were not affected. The warning now says "not installed" only when prom-client itself cannot be found, and otherwise reports the actual load error, for example a missing dependency of prom-client.
+
 ## 0.6.7
 
 ### Patch Changes
