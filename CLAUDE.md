@@ -34,8 +34,9 @@ job. Build comes first because adapters resolve `@jadedm/nestjs-verify` types th
 `pnpm lint` exists at the root but no package defines a `lint` script, so it does nothing and exits 0.
 There is no linter in this repo.
 
-Adapter packages run `vitest --passWithNoTests`, so a package with no tests reports green. Store
-adapters (Postgres, Mongo, Redis) are covered only by `pnpm test:adapters`, not by `pnpm test`. Run it
+Adapter packages run `vitest --passWithNoTests`, so a package with no tests reports green. The store
+methods (Postgres, Mongo, Redis) are covered only by `pnpm test:adapters`, not by `pnpm test`; Postgres
+has unit tests only for pool ownership and the migration runner, against scripted clients. Run it
 for any change to a store adapter or a store interface. `SMOKE_PG_URL`, `SMOKE_MG_URL`, `SMOKE_MG_DB`,
 `SMOKE_REDIS_HOST` and `SMOKE_REDIS_PORT` point it at existing databases instead (read at the top of
 `scripts/smoke-adapters.mjs`; `scripts/README.md` lists only the Postgres and Mongo ones).

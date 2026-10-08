@@ -92,7 +92,10 @@ describe('createPostgresStores, pool ownership (#65)', () => {
   });
 
   it("leaves the caller's pool alone when the database is refused as newer (case 4)", async () => {
-    const client = { query: vi.fn(async () => ({ rows: [{ version: LATEST + 1 }] })), release: vi.fn() };
+    const client = Object.assign(new EventEmitter(), {
+      query: vi.fn(async () => ({ rows: [{ version: LATEST + 1 }] })),
+      release: vi.fn(),
+    });
     const callerPool = {
       connect: vi.fn(async () => client),
       end: vi.fn(async () => undefined),
