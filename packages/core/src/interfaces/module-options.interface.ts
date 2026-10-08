@@ -100,6 +100,15 @@ export interface VerifyModuleOptions {
     attemptTimeoutMs?: number;
     /** Limit for the whole provider chain, in ms. Default 10000. */
     totalTimeoutMs?: number;
+    /**
+     * Try the next provider in `fallbacks` after an attempt that may have been
+     * accepted (it timed out, or its error carries `mayHaveSent: true`).
+     * Default true: better odds of delivery, but the fallback can send the
+     * same code a second time. With false, the chain stops there, the
+     * cooldown starts and the request answers 503 with `retryAfterMs`. An
+     * attempt that failed outright still moves on to the next provider.
+     */
+    fallbackAfterUncertain?: boolean;
   };
   rateLimit?: {
     perPhone?: RateLimitPolicy;
