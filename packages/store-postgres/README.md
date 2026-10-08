@@ -6,7 +6,7 @@ Postgres store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/packa
 pnpm add @jadedm/nestjs-verify-postgres pg
 ```
 
-Also add `@types/pg` as a dev dependency. The package's type declarations use `pg`'s types, and `pg` ships none: without them, `Pool` and `PoolConfig` are typed `any`, and with `strict` and `skipLibCheck: false`, `tsc` fails with TS7016.
+The adapter depends on `@types/pg` (any 8.x), so its own `Pool` and `PoolConfig` types need nothing else installed; an app that already has `@types/pg` 8.x shares that copy. If your own code imports from `pg` (for example to pass `pool: existingPool`), install `@types/pg` in your app as usual: pnpm does not let an app import a dependency it has not declared.
 
 ## Usage
 

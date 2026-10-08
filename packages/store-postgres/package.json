@@ -41,13 +41,15 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist"
   },
+  "dependencies": {
+    "@types/pg": "^8.6.0"
+  },
   "peerDependencies": {
     "@jadedm/nestjs-verify": "workspace:^",
     "pg": "^8.11.0"
   },
   "devDependencies": {
     "@jadedm/nestjs-verify": "workspace:*",
-    "@types/pg": "^8.11.0",
     "pg": "^8.11.0"
   }
 }
