@@ -80,7 +80,7 @@ Each store also accepts `tableName`. It changes only the queries, not what the m
 
 ## Peers
 
-- `@jadedm/nestjs-verify` 0.x
+- `@jadedm/nestjs-verify` within the range in `peerDependencies`
 - `pg` 8.x
 
 ## Consulting
