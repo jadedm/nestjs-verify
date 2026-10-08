@@ -120,9 +120,13 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
   "Version Packages" PR (Actions is allowed to create PRs in this repo since 6 Oct 2026). Before #19
   the step ran `pnpm version`, which pnpm passes to `npm version` and which changes nothing.
 - GitHub runs no workflows on a PR opened with the Actions token, so the Version Packages PR has no
-  checks and branch protection refuses to merge it. Close and reopen it (`gh pr close N && gh pr
-  reopen N`) to trigger CI, then merge; do not merge with `--admin`. It also carries Changesets'
-  formatting-only rewrite of `store-redis/package.json`, which changes no version.
+  checks and branch protection refuses to merge it. Push an empty commit under your own account to
+  `changeset-release/main` (`git commit --allow-empty` on a checkout of it, then push) so CI runs
+  on a commit the bot did not author, then merge; do not merge with `--admin`. Closing and
+  reopening the PR ran CI for 0.6.4 but left 0.6.5 BLOCKED with every check green. It also carries
+  Changesets' formatting-only rewrite of `store-redis/package.json`, which changes no version.
+- After a hand publish, npm can take about three minutes to show the new versions; wait before
+  reading a missing version as a failed publish.
 - With none, it publishes every package whose local version is not on npm, through npm trusted
   publishing (OIDC, no token). The job upgrades npm to 11 and `scripts/check-publish-env.mjs` fails
   the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 that tried to
@@ -135,7 +139,7 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
 
 Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
-agent's shell) the publish fails with `EOTP`, so hand the command over. Every version through 0.6.4
+agent's shell) the publish fails with `EOTP`, so hand the command over. Every version through 0.6.5
 was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
