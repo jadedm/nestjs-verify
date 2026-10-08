@@ -175,15 +175,22 @@ export function createMetricsRecorder(opts: {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     prom = require('prom-client') as PromModule;
-  } catch {
-    log.warn(
-      'observability.metrics.enabled is true, but prom-client is not installed; skipping metrics. ' +
-        'pnpm add prom-client to enable.',
-    );
+  } catch (err) {
+    log.warn(metricsLoadWarning(err));
     return new NoopMetricsRecorder();
   }
   const prefix = opts.prefix ?? METRICS.DEFAULT_PREFIX;
   return new PromMetricsRecorder(prom, prefix, opts.registry as PromRegistry);
 }
+
+/** Says prom-client is missing only when it is; any other load failure is reported as itself. */
+const metricsLoadWarning = (err: unknown): string => {
+  const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
+  const missing = code === 'MODULE_NOT_FOUND' && typeof message === 'string' && message.includes('prom-client');
+  if (missing) {
+    return 'observability.metrics.enabled is true, but prom-client is not installed; skipping metrics. pnpm add prom-client to enable.';
+  }
+  return `observability.metrics.enabled is true, but prom-client could not be loaded (${typeof message === 'string' ? message : String(err)}); skipping metrics.`;
+};
 
 export { BLOCK_REASON, CHECK_OUTCOME, SMS_OUTCOME };

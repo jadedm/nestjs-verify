@@ -177,6 +177,34 @@ const loadKeys = (projectDir, name, kind) => {
   return { keys: JSON.parse(r.stdout.trim().split('\n').at(-1)) };
 };
 
+// --- behaviour probes: things a package must do in a consumer's process that
+// loading alone does not show. Each prints one word; `expect` maps the
+// optional-peer state to that word.
+const CORE = '@jadedm/nestjs-verify';
+const metricsProbe = (kind) => {
+  const get = kind === 'esm' ? `(await import('${CORE}'))` : `require('${CORE}')`;
+  return `const { createMetricsRecorder } = ${get}; const r = createMetricsRecorder({ enabled: true }); console.log(r.getRegistry() ? 'registry' : 'noop')`;
+};
+const PROBES = [
+  // prom-client is an optional peer loaded with require(); ESM builds once
+  // lost it silently (#48).
+  { name: 'metrics recorder', pkg: CORE, code: metricsProbe, expect: { withOptional: 'registry', withoutOptional: 'noop' } },
+];
+const runProbe = (projectDir, probe, kind, state) => {
+  const args = kind === 'esm' ? ['--input-type=module', '-e', probe.code(kind)] : ['-e', probe.code(kind)];
+  const r = run(process.execPath, args, { cwd: projectDir, timeout: LOAD_TIMEOUT_MS });
+  const got = r.status === 0 ? r.stdout.trim().split('\n').at(-1) : `exit ${r.status ?? r.signal ?? r.error?.code}: ${tail(r, 3)}`;
+  const want = probe.expect[state];
+  if (got !== want) fail(`${probe.pkg} ${probe.name} (${kind}, ${state}): got ${got}, want ${want}`);
+  console.log(`${got === want ? 'ok  ' : 'FAIL'}  ${probe.name} ${kind} ${state}: ${got}`);
+};
+const runProbes = (projectDir, state) => {
+  const present = new Set(checked.map(({ pkg }) => pkg.name));
+  for (const probe of PROBES.filter((p) => present.has(p.pkg))) {
+    for (const kind of ['esm', 'cjs']) runProbe(projectDir, probe, kind, state);
+  }
+};
+
 const packDir = mkdtempSync(join(tmpdir(), 'nv-pack-'));
 const projectDir = mkdtempSync(join(tmpdir(), 'nv-consumer-'));
 try {
@@ -244,6 +272,8 @@ try {
     console.log(`${problems.length ? 'FAIL' : 'ok  '}  ${pkg.name}@${pkg.version}${problems.length ? '' : ` (${esm.keys.length} exports)`}`);
   }
 
+  runProbes(projectDir, 'withOptional');
+
   // 4. strict tsc three ways
   const imports = checked.map(({ pkg }, i) => `import * as m${i} from '${pkg.name}';\nvoid m${i};`).join('\n');
   for (const file of ['check.ts', 'check.mts']) writeFileSync(join(projectDir, file), `${imports}\nexport {};\n`);
@@ -280,6 +310,7 @@ try {
       if (errors.length) fail(`${pkg.name} without optional peers: ${errors.join('; ')}`);
       console.log(`${errors.length ? 'FAIL' : 'ok  '}  ${pkg.name} loads without ${[...optionalPeers].join(', ')}`);
     }
+    runProbes(projectDir, 'withoutOptional');
   }
 } catch (err) {
   fail(err instanceof Error ? err.message : String(err));
