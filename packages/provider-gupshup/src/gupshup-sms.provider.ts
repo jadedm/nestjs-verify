@@ -24,11 +24,14 @@ export interface GupshupSmsProviderOptions {
   retryBaseMs?: number;
   /**
    * Retry an attempt that may have been accepted (HTTP 500, 502 or 504, a
-   * response broken after its headers, a body that could not be read, a network error after connecting).
+   * body that could not be read, or any network error other than a refused
+   * connection, a DNS failure, an unreachable host or network, or a connect
+   * timeout).
    * Default true: better odds of delivery, but a retry can deliver the same
    * code a second time. With false, such a failure is thrown at once, marked
    * mayHaveSent, and the user's retry waits for the cooldown. Failures known
    * not to have sent (429, 503, refused connection, DNS) are retried either way.
+   * The core may still try the next provider in `fallbacks` (#51).
    */
   retryAfterUncertain?: boolean;
   /** Override the fetch implementation (useful for tests). */
@@ -163,6 +166,9 @@ export class GupshupSmsProvider implements SmsProvider {
       const [res, fetchErr] = await asyncHandler(
         this.opts.fetchImpl(url, { method: 'GET', signal }),
       );
+      // A request the caller aborted is a cancellation, not a provider
+      // failure to classify: surface the abort reason.
+      signal?.throwIfAborted();
       const status = res?.status ?? 0;
       const [body, bodyErr] = res
         ? await asyncHandler(res.text())

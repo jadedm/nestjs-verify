@@ -278,9 +278,37 @@ describe('GupshupSmsProvider, retryAfterUncertain (#43)', () => {
     const unreadable = vi.fn(async () =>
       ({ status: 200, text: async () => { throw new Error('terminated'); } }) as unknown as Response,
     ) as unknown as typeof fetch;
-    const err = (await send(provider(unreadable, false))) as { mayHaveSent?: unknown };
+    const err = (await send(provider(unreadable, false))) as { mayHaveSent?: unknown; name?: string };
     expect(unreadable).toHaveBeenCalledTimes(1);
+    expect(err.name).toBe('GupshupTransientError');
     expect(err.mayHaveSent).toBe(true);
+  });
+
+  it('still retries a refused connection when false (review)', async () => {
+    let calls = 0;
+    const refusedThenOk = (async () => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) });
+      return new Response('success | sent | 1709-OK', { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await send(provider(refusedThenOk, false))).toEqual({ providerMessageId: '1709-OK', provider: 'gupshup' });
+    expect(calls).toBe(2);
+  });
+
+  it('rejects with the abort reason when the request is aborted in flight, when false (Codex, PR #50)', async () => {
+    const controller = new AbortController();
+    const reason = new Error('core gave up');
+    const hanging = ((_: unknown, init?: RequestInit) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      })) as unknown as typeof fetch;
+    setTimeout(() => controller.abort(reason), 10);
+    const p = provider(hanging, false);
+    const err = await p.send({ to: '+919999', body: 'code' }, { signal: controller.signal }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBe(reason);
   });
 
   it('still retries a 503 when false (case 7)', async () => {

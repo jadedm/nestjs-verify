@@ -155,11 +155,14 @@ describe('TwilioSmsProvider, may-have-sent mark (#33)', () => {
     expect((await thrown(failWith(netErr('ENETUNREACH'))))?.mayHaveSent).toBeUndefined();
   });
 
-  it('leaves a frozen error alone instead of throwing while marking it (review)', async () => {
+  it('wraps a frozen error so the mark is kept (review, PR #50)', async () => {
     const frozen = Object.freeze(Object.assign(new Error('HTTP 504'), { status: 504 }));
-    const err = await thrown(failWith(frozen));
-    expect(err).toBe(frozen);
-    expect(err?.mayHaveSent).toBeUndefined();
+    const err = (await thrown(failWith(frozen))) as { mayHaveSent?: unknown; status?: number; message?: string; cause?: unknown };
+    expect(err).not.toBe(frozen);
+    expect(err.cause).toBe(frozen);
+    expect(err.mayHaveSent).toBe(true);
+    expect(err.status).toBe(504);
+    expect(err.message).toBe('HTTP 504');
   });
 
   it('does not mark a 400 on its own (case 9)', async () => {
@@ -186,9 +189,11 @@ describe('TwilioSmsProvider, retryAfterUncertain (#43)', () => {
     );
 
   it('stops after one uncertain attempt when false (case 1)', async () => {
-    const create = failing(http(504));
+    const original = http(504);
+    const create = failing(original);
     const err = await send(patchMessages(provider(false), create));
     expect(create).toHaveBeenCalledTimes(1);
+    expect(err).toBe(original);
     expect((err as { mayHaveSent?: unknown }).mayHaveSent).toBe(true);
   });
 
