@@ -22,6 +22,15 @@ export interface GupshupSmsProviderOptions {
   maxRetries?: number;
   /** Base delay in ms for exponential backoff. Default 250. */
   retryBaseMs?: number;
+  /**
+   * Retry an attempt that may have been accepted (HTTP 500, 502 or 504, a
+   * response broken after its headers, a body that could not be read, a network error after connecting).
+   * Default true: better odds of delivery, but a retry can deliver the same
+   * code a second time. With false, such a failure is thrown at once, marked
+   * mayHaveSent, and the user's retry waits for the cooldown. Failures known
+   * not to have sent (429, 503, refused connection, DNS) are retried either way.
+   */
+  retryAfterUncertain?: boolean;
   /** Override the fetch implementation (useful for tests). */
   fetchImpl?: typeof fetch;
 }
@@ -131,6 +140,7 @@ export class GupshupSmsProvider implements SmsProvider {
       endpoint: opts.endpoint ?? DEFAULT_ENDPOINT,
       maxRetries: opts.maxRetries ?? 2,
       retryBaseMs: opts.retryBaseMs ?? 250,
+      retryAfterUncertain: opts.retryAfterUncertain ?? true,
       fetchImpl: opts.fetchImpl ?? fetch,
     };
   }
@@ -162,7 +172,8 @@ export class GupshupSmsProvider implements SmsProvider {
         status,
         body ?? '',
       );
-      uncertain = uncertain || (outcome.kind !== 'ok' && attemptMayHaveSent(fetchErr, bodyErr, status));
+      const attemptUncertain = outcome.kind !== 'ok' && attemptMayHaveSent(fetchErr, bodyErr, status);
+      uncertain = uncertain || attemptUncertain;
 
       if (outcome.kind === 'ok') {
         return {
@@ -175,6 +186,12 @@ export class GupshupSmsProvider implements SmsProvider {
       }
       // transient
       lastTransient = outcome.message;
+      if (attemptUncertain && !this.opts.retryAfterUncertain) {
+        throw markIfUncertain(
+          new GupshupTransientError(`Gupshup may have accepted the message, not retried: ${outcome.message}`),
+          uncertain,
+        );
+      }
       if (attempt === this.opts.maxRetries) break;
       await this.sleep(this.opts.retryBaseMs * 2 ** attempt, signal);
       attempt++;

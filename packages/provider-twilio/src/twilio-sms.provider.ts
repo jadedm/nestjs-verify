@@ -18,6 +18,15 @@ export interface TwilioSmsProviderOptions {
   maxRetries?: number;
   /** Base delay in ms for exponential backoff. Default 250. */
   retryBaseMs?: number;
+  /**
+   * Retry an attempt that may have been accepted (HTTP 500, 502 or 504, a
+   * response broken after its headers, a network error after connecting).
+   * Default true: better odds of delivery, but a retry can deliver the same
+   * code a second time. With false, such a failure is thrown at once, marked
+   * mayHaveSent, and the user's retry waits for the cooldown. Failures known
+   * not to have sent (429, 503, refused connection, DNS) are retried either way.
+   */
+  retryAfterUncertain?: boolean;
 }
 
 /**
@@ -57,12 +66,14 @@ export class TwilioSmsProvider implements SmsProvider {
   private readonly from: string;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
+  private readonly retryAfterUncertain: boolean;
 
   constructor(opts: TwilioSmsProviderOptions) {
     this.client = new twilio.Twilio(opts.accountSid, opts.authToken);
     this.from = opts.from;
     this.maxRetries = opts.maxRetries ?? 2;
     this.retryBaseMs = opts.retryBaseMs ?? 250;
+    this.retryAfterUncertain = opts.retryAfterUncertain ?? true;
   }
 
   /**
@@ -93,9 +104,11 @@ export class TwilioSmsProvider implements SmsProvider {
         return { providerMessageId: message.sid, provider: this.name };
       } catch (err) {
         lastErr = err;
-        uncertain = uncertain || mayHaveBeenAccepted(err);
+        const attemptUncertain = mayHaveBeenAccepted(err);
+        uncertain = uncertain || attemptUncertain;
         const status = (err as { status?: number }).status;
         if (status && !TRANSIENT_STATUS_CODES.has(status)) throw markIfUncertain(err, uncertain);
+        if (attemptUncertain && !this.retryAfterUncertain) break;
         if (attempt === this.maxRetries) break;
         await this.sleep(this.retryBaseMs * 2 ** attempt, signal);
         attempt++;
