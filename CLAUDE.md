@@ -58,8 +58,9 @@ Core (`packages/core/src`):
   before the send, or a send that definitely failed, releases the claim (after its cleanup), so it
   leaves no cooldown. If the send or the bookkeeping after it fails, the record and
   index are deleted and `SmsDispatchFailedException` (503) is thrown. `check`: phone index to sid, load record, only a
-  `pending` record can approve, expiry is checked lazily on read, a wrong code calls the store's atomic
-  `incrementAttempts`.
+  `pending` record can approve, expiry is checked lazily on read, then the store's atomic
+  `reserveAttempt` counts the attempt before the code is compared; a refused reservation answers
+  `canceled` without comparing, and a wrong code that spends the last attempt cancels the record.
 - `recipient.ts`: a recipient has a `key` (store key: E.164 phone, or the lowercased email) and an
   `address` (where the code is sent). On `check` the channel is not sent, so SMS vs email is inferred
   from whether `to` contains `@`. Store fields named `phone` hold email addresses too.
@@ -98,9 +99,12 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
 
 ## Contracts that adapters must hold
 
-- `VerifyStore.incrementAttempts` is a single atomic round trip that increments attempts and, on
-  reaching `maxAttempts`, flips status to `canceled` in the same operation. Postgres does this with
-  `UPDATE ... RETURNING` and a `CASE`; Mongo with `findOneAndUpdate` and an aggregation pipeline.
+- `VerifyStore.reserveAttempt` is a single atomic operation that increments attempts only while the
+  record is `pending`, not past `expiresAt`, and below `maxAttempts`, and never changes the status, so of any number of
+  simultaneous checks at most `maxAttempts` compare a code. Postgres does this with one
+  `UPDATE ... WHERE attempts < max_attempts RETURNING`; Mongo with a filtered `findOneAndUpdate`.
+  Counting after comparing let a burst of checks compare more codes than `maxAttempts` (0.8.0).
+  `incrementAttempts` remains on the shipped stores, deprecated, and is no longer in the interface.
 - `markStatus` only transitions out of `pending` and returns false if the record was no longer pending.
 - `CooldownStore.claim` decides the holder in one atomic operation and renews for the same holder;
   `release` and `PhoneIndexStore.deleteIfMatches` remove only what the given holder or sid still owns

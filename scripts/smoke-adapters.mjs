@@ -92,6 +92,21 @@ async function exerciseVerifyStore(name, verify) {
 
   await verify.delete(v1.sid);
   assert((await verify.get(v1.sid)) === null, 'delete works');
+
+  // reserveAttempt: at most maxAttempts of many simultaneous reservations.
+  const v4 = recordFixture(`vr_reserve_${RUN}`, { attempts: 0, maxAttempts: 3 });
+  await verify.create(v4);
+  const many = (await Promise.all(Array.from({ length: 10 }, () => verify.reserveAttempt(v4.sid)))).map((r) => r.outcome);
+  assert(many.filter((o) => o === 'reserved').length === 3, `exactly 3 of 10 simultaneous reservations succeed, got ${many.join(',')}`);
+  assert(many.filter((o) => o === 'exhausted').length === 7, 'the other 7 are exhausted');
+  const after = await verify.get(v4.sid);
+  assert(after.attempts === 3 && after.status === 'pending', `reserveAttempt never changes the status, got ${after.attempts}/${after.status}`);
+  assert((await verify.reserveAttempt('vr_missing')).outcome === 'not-found', 'reserve on unknown sid -> not-found');
+  assert((await verify.reserveAttempt(v3.sid)).outcome === 'not-pending', 'reserve on a finished record -> not-pending');
+  const v5 = recordFixture(`vr_expired_${RUN}`, { attempts: 0, maxAttempts: 3, expiresAt: new Date(Date.now() - 1_000) });
+  await verify.create(v5);
+  const rExp = await verify.reserveAttempt(v5.sid);
+  assert(rExp.outcome === 'expired' && rExp.record.attempts === 0, `reserve on an expired record -> expired, attempts untouched, got ${rExp.outcome}/${rExp.record?.attempts}`);
 }
 
 async function exerciseAbuseStore(name, abuse) {
@@ -230,6 +245,18 @@ async function exerciseEmailFlow(name, stores) {
   assert(results.filter((r) => r === 'ok').length === 1, `one of 5 simultaneous starts succeeds, got ${results.join(',')}`);
   assert(results.filter((r) => r === 'COOLDOWN_ACTIVE').length === 4, 'the other four get COOLDOWN_ACTIVE');
   assert(sent.length - before === 1, 'one code sent');
+
+  // A burst of simultaneous wrong checks spends exactly attempts.max (2)
+  // attempts: one answers pending with one left, the one that spends the last
+  // locks the record, and the rest are refused without a comparison.
+  const burst = `burst.${tag}.${RUN}@example.com`;
+  const { sid: burstSid } = await service.start({ to: burst, channel: 'email' });
+  const answers = await Promise.all(
+    Array.from({ length: 20 }, (_, i) => service.check({ to: burst, code: String(100000 + i) }).then((r) => r.state, (e) => e?.code ?? e?.message)),
+  );
+  const burstRecord = await stores.verify.get(burstSid);
+  assert(burstRecord.attempts === 2 && burstRecord.status === 'canceled', `a burst spends exactly 2 attempts, got ${burstRecord.attempts}/${burstRecord.status}`);
+  assert(answers.filter((a) => a === 'pending').length === 1, `one wrong guess answers pending, got ${answers.join(',')}`);
 }
 
 // A second start must wait while another instance holds the migration lock.

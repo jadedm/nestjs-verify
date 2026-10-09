@@ -45,7 +45,7 @@
     "@types/pg": "^8.6.0"
   },
   "peerDependencies": {
-    "@jadedm/nestjs-verify": "workspace:>=0.6.8 <0.8.0",
+    "@jadedm/nestjs-verify": "workspace:>=0.6.8 <0.9.0",
     "pg": "^8.11.0"
   },
   "devDependencies": {

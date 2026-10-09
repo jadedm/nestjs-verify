@@ -58,7 +58,7 @@ pnpm test:adapters:mongo-drivers
 
 ### What smoke-adapters asserts
 
-The table lists the `VerifyStore` and `AbuseStore` invariants. The script also checks the rate-limit, cooldown (including atomic claims: one winner of ten simultaneous claims) and phone-index stores, the audit sinks, the Mongo migration lock, and whole verifications through `VerifyService`, including five simultaneous starts sending one code.
+The table lists the `VerifyStore` and `AbuseStore` invariants (`incrementAttempts` is deprecated but still exercised). `reserveAttempt` is checked too: exactly 3 of 10 simultaneous reservations succeed on a record with three attempts, and it never changes the status. The script also checks the rate-limit, cooldown (including atomic claims: one winner of ten simultaneous claims) and phone-index stores, the audit sinks, the Mongo migration lock, and whole verifications through `VerifyService`, including five simultaneous starts sending one code and a burst of wrong checks spending exactly the attempt limit.
 
 | # | Invariant |
 |---|---|

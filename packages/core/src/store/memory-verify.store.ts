@@ -1,5 +1,6 @@
 import {
   IncrementResult,
+  ReserveResult,
   VerificationRecord,
   VerificationStatus,
   VerifyStore,
@@ -28,6 +29,19 @@ export class MemoryVerifyStore implements VerifyStore {
     return { ...r };
   }
 
+  /** Atomic within one process: no await between the read and the write. */
+  async reserveAttempt(sid: string): Promise<ReserveResult> {
+    const r = this.records.get(sid);
+    if (!r) return { record: null, outcome: 'not-found' };
+    if (r.status !== 'pending') return { record: { ...r }, outcome: 'not-pending' };
+    if (r.expiresAt.getTime() <= Date.now()) return { record: { ...r }, outcome: 'expired' };
+    if (r.attempts >= r.maxAttempts) return { record: { ...r }, outcome: 'exhausted' };
+    const updated: VerificationRecord = { ...r, attempts: r.attempts + 1 };
+    this.records.set(sid, updated);
+    return { record: { ...updated }, outcome: 'reserved' };
+  }
+
+  /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
   async incrementAttempts(sid: string): Promise<IncrementResult> {
     const r = this.records.get(sid);
     if (!r) return { record: null, outcome: 'not-found' };

@@ -82,3 +82,33 @@ describe('MemoryVerifyStore', () => {
     expect(await store.get('vr_test_1')).toBeNull();
   });
 });
+
+describe('MemoryVerifyStore.reserveAttempt', () => {
+  const record = (over: Partial<VerificationRecord> = {}): VerificationRecord => ({
+    sid: 'vr_r', phone: '+1', channel: 'sms', codeHash: 'h', salt: 's', attempts: 0, maxAttempts: 3,
+    status: 'pending', createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000), ...over,
+  });
+
+  it('reserves up to maxAttempts of many simultaneous calls, never changing the status', async () => {
+    const store = new MemoryVerifyStore();
+    await store.create(record());
+    const outcomes = (await Promise.all(Array.from({ length: 10 }, () => store.reserveAttempt('vr_r')))).map((r) => r.outcome);
+    expect(outcomes.filter((o) => o === 'reserved')).toHaveLength(3);
+    expect(outcomes.filter((o) => o === 'exhausted')).toHaveLength(7);
+    expect(await store.get('vr_r')).toMatchObject({ attempts: 3, status: 'pending' });
+  });
+
+  it('answers not-pending and not-found', async () => {
+    const store = new MemoryVerifyStore();
+    await store.create(record({ status: 'approved' }));
+    expect((await store.reserveAttempt('vr_r')).outcome).toBe('not-pending');
+    expect((await store.reserveAttempt('nope')).outcome).toBe('not-found');
+  });
+
+  it('answers expired for a pending record past expiresAt', async () => {
+    const store = new MemoryVerifyStore();
+    await store.create(record({ expiresAt: new Date(Date.now() - 1) }));
+    expect((await store.reserveAttempt('vr_r')).outcome).toBe('expired');
+    expect((await store.get('vr_r'))!.attempts).toBe(0);
+  });
+});

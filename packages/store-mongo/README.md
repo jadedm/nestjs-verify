@@ -36,7 +36,7 @@ Mongoose users: `mongooseConnection.db` returns the underlying `Db`.
 
 ## Atomicity
 
-`incrementAttempts` issues a single `findOneAndUpdate` with an aggregation pipeline update (Mongo 4.2+). The pipeline increments `attempts` and, in the same operation, conditionally flips `status` to `canceled` when `attempts` reaches `maxAttempts`. No race window between increment and lockout.
+`reserveAttempt` issues a single `findOneAndUpdate` whose filter matches only a `pending` document below its `maxAttempts`, so of any number of simultaneous checks at most `maxAttempts` get to compare a code. The deprecated `incrementAttempts` is kept for direct callers.
 
 ## TTL
 

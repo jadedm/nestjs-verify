@@ -129,10 +129,10 @@ describe('VerifyService, index entries removed only while they hold this sid (#9
   it("keeps a newer verification's entry when check locks out the older one (case 5)", async () => {
     const service = build(provider(), { attempts: { max: 1 } });
     await service.start({ to: PHONE });
-    const increment = stores.verify.incrementAttempts.bind(stores.verify);
-    vi.spyOn(stores.verify, 'incrementAttempts').mockImplementationOnce(async (sid) => {
+    const reserve = stores.verify.reserveAttempt.bind(stores.verify);
+    vi.spyOn(stores.verify, 'reserveAttempt').mockImplementationOnce(async (sid) => {
       await stores.phoneIndex.set(PHONE, NEWER, 600);
-      return increment(sid);
+      return reserve(sid);
     });
     expect((await service.check({ to: PHONE, code: '000000' })).state).toBe('canceled');
     expect(await stores.phoneIndex.get(PHONE)).toBe(NEWER);

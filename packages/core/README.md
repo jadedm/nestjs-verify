@@ -145,7 +145,7 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 * Crypto-random code generation via `crypto.randomInt`.
 * Constant-time code comparison via `crypto.timingSafeEqual`.
 * Salted SHA-256 storage of codes at rest. The code is never persisted in clear.
-* Atomic attempt counters using `UPDATE ... RETURNING` (Postgres) and aggregation pipeline updates (Mongo). Lockout on max attempts happens in a single round trip.
+* Attempts counted before the code is compared, with one atomic store operation (`UPDATE ... RETURNING` in Postgres, a filtered `findOneAndUpdate` in Mongo), so simultaneous checks cannot compare more codes than the attempt limit.
 * Per-recipient and per-IP rate limiting with fixed window semantics; each store's counter is a single atomic operation.
 * Per-recipient cooldown after each send, claimed atomically before sending, so simultaneous starts for one recipient send one code.
 * Distinct-recipients-per-IP velocity check, configurable window.
