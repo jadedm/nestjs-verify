@@ -42,7 +42,9 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      has-changesets: ${{ steps.changesets.outputs.has-changesets }}
+      # changesets/action v1 names this output hasChangesets; has-changesets
+      # exists only on its v2 line, and reading it would skip publish forever.
+      has-changesets: ${{ steps.changesets.outputs.hasChangesets }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -74,13 +76,15 @@ jobs:
       id-token: write
     steps:
       # Full history: tag-releases finds each version's release commit.
-      - uses: actions/checkout@v4
+      # Actions pinned to commits in this job: it can mint a publish token, so
+      # a moved tag must not change what runs here.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -94,7 +98,7 @@ jobs:
       # No install scripts run where a publish token can be minted; the
       # packages themselves have no lifecycle scripts.
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: packages
@@ -106,8 +110,14 @@ jobs:
               exit 1
             fi
           done
-      # The build that ships is the one loaded here.
-      - run: pnpm check:exports
+      # check:exports is not rerun here: loading the packages runs their
+      # dependencies' code where a publish token can be minted. The build job
+      # ran it on this same artifact, from this same run.
+      # Annotated tags (changeset publish, tag-releases) need a committer;
+      # runners have none, and changesets/action set it only in its own job.
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       # Trusted publishing via OIDC: no NPM_TOKEN secret. setup-node's
       # registry-url writes a placeholder NODE_AUTH_TOKEN; npm 11 exchanges the
       # OIDC token first and uses that instead. Each package needs a trusted
