@@ -6,51 +6,117 @@ on:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
+# GitHub grants permissions per job, not per step, so only the publish job
+# can mint the OIDC token npm's trusted publisher accepts, and that job runs
+# no dependency install scripts (#37). The build and the Version Packages PR
+# happen in jobs without it.
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
         with:
           version: 9
-      # No dependency cache in a job that publishes: npm's trusted publishing
-      # guide advises against it, since a poisoned cache would ship.
+      # No dependency cache in a workflow that publishes: npm's trusted
+      # publishing guide advises against it, since a poisoned cache would ship.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # Never publish a build that a consumer could not load.
+      - run: pnpm check:exports
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: packages/*/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      has-changesets: ${{ steps.changesets.outputs.has-changesets }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Version mode only (no `publish` input): with pending changesets this
+      # opens or updates the Version Packages PR. `version` must call
+      # Changesets itself: `pnpm version` is passed to `npm version`, which
+      # only prints versions, so the PR would be empty.
+      - id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          commit: "chore: release packages"
+          title: "chore: release packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: [build, version]
+    if: needs.version.outputs.has-changesets == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      # Full history: tag-releases finds each version's release commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
       # Trusted publishing (OIDC) needs npm 11.5.1+; Node 22 bundles npm 10,
       # which answers an OIDC publish with E404 (#19). pnpm publish runs this
-      # npm for the upload.
-      # Pinned: this job holds id-token: write, so it should not pick up a new
-      # npm release unreviewed. Any 11.x from 11.5.1 passes the check below.
+      # npm for the upload. Pinned: this job holds id-token: write, so it
+      # should not pick up a new npm release unreviewed. Any 11.x from 11.5.1
+      # passes the check below.
       - run: npm install -g npm@11.21.0
       - run: node scripts/check-publish-env.mjs
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      # Never publish a build that a consumer could not load.
+      # No install scripts run where a publish token can be minted; the
+      # packages themselves have no lifecycle scripts.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: packages
+      - name: Every package has the build from the build job
+        run: |
+          for dir in packages/*/; do
+            if [ ! -f "${dir}dist/index.js" ]; then
+              echo "missing ${dir}dist/index.js" >&2
+              exit 1
+            fi
+          done
+      # The build that ships is the one loaded here.
       - run: pnpm check:exports
       # Trusted publishing via OIDC: no NPM_TOKEN secret. setup-node's
       # registry-url writes a placeholder NODE_AUTH_TOKEN; npm 11 exchanges the
       # OIDC token first and uses that instead. Each package needs a trusted
       # publisher on npmjs.com (package Settings, Trusted Publisher: GitHub
       # Actions, repository jadedm/nestjs-verify, workflow release.yml).
-      # Provenance is automatic.
-      #
-      # `version` must call Changesets itself: `pnpm version` is passed to
-      # `npm version`, which only prints versions, so the Version Packages PR
-      # would be empty. `publish` skips the root `release` script's second
-      # build, so what ships is the build check:exports just loaded.
-      - uses: changesets/action@v1
-        with:
-          publish: pnpm changeset publish
-          version: pnpm changeset version
-          commit: "chore: release packages"
-          title: "chore: release packages"
+      # Provenance is automatic. A version already on npm is skipped.
+      - run: pnpm changeset publish
+      # Tags every published version and releases each package's newest one,
+      # as a hand publish does (#91).
+      - run: node scripts/tag-releases.mjs
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
