@@ -24,7 +24,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dryRun = process.argv.includes('--dry-run');
+const args = process.argv.slice(2);
+// A mistyped --dry-run must not turn into a real run that pushes tags.
+const unknown = args.filter((a) => a !== '--dry-run');
+if (unknown.length > 0) {
+  console.error(`tag-releases: unknown option(s) ${unknown.join(' ')}; usage: node scripts/tag-releases.mjs [--dry-run]`);
+  process.exit(2);
+}
+const dryRun = args.includes('--dry-run');
 const CORE = '@jadedm/nestjs-verify';
 
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts }).trim();
@@ -107,7 +114,9 @@ for (const { tag, latest } of toRelease) console.log(`${dryRun ? 'would release'
 if (toTag.length === 0 && toRelease.length === 0) console.log('tag-releases: every published version is tagged and released');
 if (dryRun) process.exit(0);
 
-for (const { tag, sha } of toTag) git('tag', '-a', tag, sha, '-m', tag);
+// -f: a local tag left by an earlier run whose push failed is not on origin,
+// so it is replaced rather than stopping the retry.
+for (const { tag, sha } of toTag) git('tag', '-f', '-a', tag, sha, '-m', tag);
 if (toTag.length > 0) git('push', '--quiet', 'origin', ...toTag.map(({ tag }) => `refs/tags/${tag}`));
 
 const work = mkdtempSync(path.join(tmpdir(), 'tag-releases-'));
