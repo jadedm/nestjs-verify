@@ -382,13 +382,16 @@ export class VerifyService {
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
+    // This process's clock set expiresAt, so it judges the deadline here; a
+    // database store's reservation judges it again by the database clock, and
+    // the stricter of the two wins. Leaving it to the database alone would let
+    // a code live past its TTL whenever the database clock runs behind.
+    if (record.expiresAt.getTime() <= Date.now()) throw await this.expire(phone, sid, record.channel, params.ip, checkStart);
+
     // The attempt is counted before the code is compared. A reservation is
     // atomic and refused once maxAttempts are spent, so of any number of
     // simultaneous checks at most maxAttempts compare a code. Comparing first
     // let every check already in flight compare before the lockout landed.
-    // Expiry is decided here too, by the store's clock: a database store
-    // judges it with the database clock, which this process's clock may
-    // disagree with (#105).
     const { record: reserved, outcome: reservation } =
       await this.options.stores.verify.reserveAttempt(sid);
     if (reservation === 'not-found' || !reserved) {

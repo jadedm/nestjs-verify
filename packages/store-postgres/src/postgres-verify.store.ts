@@ -34,9 +34,10 @@ type ReserveOutcome = {
 };
 
 // Why a reservation that matched nothing was refused. The decision was made
-// atomically by the update; this only names it from a later read. Expiry is
-// judged by the database clock the update used, not this process's clock,
-// which may disagree with it (#105).
+// atomically by the update; this only names it from a later read, on the
+// same database clock rather than this process's, which may disagree with
+// it (#105). The read is a moment later than the update, so a record spent
+// just before its deadline can be named expired; that fails closed.
 const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveOutcome['outcome'] => {
   if (r.status !== 'pending') return 'not-pending';
   if (expired) return 'expired';

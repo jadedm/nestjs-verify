@@ -282,13 +282,12 @@ async function exerciseEmailFlow(name, stores) {
   assert(answers.every((a) => a === 'pending' || a === 'canceled'), `every other guess answers canceled, got ${answers.join(',')}`);
 }
 
-// The service leaves expiry to the store's reservation, so with a Postgres
-// store the database clock decides it: a server clock running ahead does not
-// expire a code the database still holds valid (#105). Mongo is not run here:
-// its phone index judges expiry by this process's clock, so the lookup would
-// fail before the check reached the reservation.
-async function exerciseDbClockExpiry(name, stores) {
-  console.log(`\n--- ${name} check expiry follows the database clock ---`);
+// This process's clock set the deadline, so the service holds it even while
+// the database still finds the code valid: the stricter clock wins (#105).
+// Mongo is not run here: its phone index judges expiry by this process's
+// clock, so the lookup would fail before the check reached the deadline.
+async function exerciseServerClockExpiry(name, stores) {
+  console.log(`\n--- ${name} check holds the deadline the server set ---`);
   const service = new VerifyService({
     email: { provider: new MockEmailProvider({ logToConsole: false }) },
     stores,
@@ -306,7 +305,7 @@ async function exerciseDbClockExpiry(name, stores) {
   } finally {
     Date.now = realDateNow;
   }
-  assert(answer === 'pending', `a wrong code with the server clock 2 minutes ahead -> pending, got ${answer}`);
+  assert(answer === 'CODE_EXPIRED', `a code past its deadline by the server clock, valid by the database clock -> CODE_EXPIRED, got ${answer}`);
 }
 
 // A second start must wait while another instance holds the migration lock.
@@ -346,7 +345,7 @@ async function smokePostgres() {
   await exercisePhoneIndexStore('Postgres', pg.phoneIndex);
   await exerciseAuditSink('Postgres', pg.audit);
   await exerciseEmailFlow('Postgres', pg);
-  await exerciseDbClockExpiry('Postgres', pg);
+  await exerciseServerClockExpiry('Postgres', pg);
   await pg.pool.end();
 }
 

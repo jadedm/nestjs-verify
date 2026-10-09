@@ -4,6 +4,4 @@
 "@jadedm/nestjs-verify-mongo": patch
 ---
 
-`check` no longer answers `pending` for a wrong code when it can see that another check approved or cancelled the verification while this one was comparing; it answers `canceled`. A check of a finished verification is now counted under the `no_pending` metric outcome.
-
-`check` now leaves the expiry decision to the verify store's `reserveAttempt`, which already refused expired records, instead of first comparing `expiresAt` with the server's clock. With the Postgres or Mongo store, expiry is therefore judged by the database clock, and a refused reservation is reported as expired or as spent attempts by that same clock. The Mongo phone index still judges its own entry's expiry by the server's clock.
+`check` no longer answers `pending` for a wrong code when it can see that another check approved or cancelled the verification while this one was comparing; it answers `canceled`. A check of a finished verification is now counted under the `no_pending` metric outcome. The Postgres and Mongo stores now report why a reservation was refused (expired, or attempts spent) by the database clock that refused it, rather than the server's clock, which could disagree.
