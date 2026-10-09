@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify-redis",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Redis store adapter for @jadedm/nestjs-verify. Atomic rate limit, cooldown, phone-index via Lua and native TTL primitives.",
   "keywords": [
     "nestjs",

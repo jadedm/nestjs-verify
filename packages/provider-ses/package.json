@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify-ses",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Amazon SES email provider adapter for @jadedm/nestjs-verify.",
   "keywords": [
     "nestjs",
