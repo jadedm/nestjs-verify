@@ -160,20 +160,21 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 
 ### Before 1.0
 
-The plan to 1.0 and the decisions still open are tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). Known gaps today:
+The plan to 1.0 is tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). 1.0 adds no new features: it is the fixes and breaking renames below, then a frozen public interface.
 
-1. Delivery receipts ([#86](https://github.com/jadedm/nestjs-verify/issues/86)). The library hands a code to the provider but does not process delivery callbacks (Twilio and Gupshup DLR webhooks, SES delivery events).
-2. Store and policy names still say "phone" where they hold an email address too ([#8](https://github.com/jadedm/nestjs-verify/issues/8)), and send metrics carry no channel label ([#7](https://github.com/jadedm/nestjs-verify/issues/7)). Renaming them is a breaking change, planned before 1.0.
-3. A phone-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent.
+1. Store and policy names still say "phone" where they hold an email address too ([#8](https://github.com/jadedm/nestjs-verify/issues/8)), and send metrics carry no channel label ([#7](https://github.com/jadedm/nestjs-verify/issues/7)). Renaming them is a breaking change, planned for 0.8.0.
+2. A phone-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent. Planned for 0.8.0.
 
-### Not decided for 1.0
+### After 1.0
 
-Each of these is an open decision on [#89](https://github.com/jadedm/nestjs-verify/issues/89). Plan deployments as if they are absent.
+These are not in 1.0. Plan deployments as if they are absent. Additive features are planned for 1.x minors; a change that breaks existing stores or data waits for 2.0.
 
-1. Multi-tenant isolation. Rate-limit and cooldown state is keyed by recipient alone, so two tenants in one deployment share state for a phone number or address that exists in both. If you need per-tenant isolation, wrap the service in your own tenant-scoping layer or open an issue describing the shape you need.
-2. Tamper-evident audit log. The audit sink records events but does not chain or sign them.
-3. Internationalized message templates. `messageTemplate` is a single string today.
-4. KMS-backed code hashing. SHA-256 with a random salt is the current primitive.
+1. Delivery receipts ([#86](https://github.com/jadedm/nestjs-verify/issues/86)), 1.x. The library hands a code to the provider but does not process delivery callbacks (Twilio and Gupshup DLR webhooks, SES delivery events).
+2. Internationalized message templates, 1.x. `messageTemplate` is a single string today.
+3. KMS-backed code hashing, 1.x as a pluggable hasher. SHA-256 with a random salt is the current primitive and would stay the default.
+4. Tamper-evident audit log, 1.x. The audit sink records events but does not chain or sign them.
+5. Voice and WhatsApp channels, 1.x. They are refused with `CHANNEL_NOT_SUPPORTED` today.
+6. Multi-tenant isolation, 2.0. Rate-limit and cooldown state is keyed by recipient alone, so two tenants in one deployment share state for a phone number or address that exists in both. If you need per-tenant isolation now, wrap the service in your own tenant-scoping layer.
 
 ### How to evaluate suitability for your project
 
@@ -189,7 +190,7 @@ Defer adoption when:
 * You require SOC 2 or PCI evidence trails out of the box.
 * You require multi-tenant isolation of OTP state today.
 
-If you adopt it for a use case in the second list, expect to add the missing pieces yourself or wait for the matching decision on #89.
+If you adopt it for a use case in the second list, expect to add the missing pieces yourself or wait for the matching release on #89.
 
 ## Help
 
