@@ -34,10 +34,12 @@ type ReserveOutcome = {
 };
 
 // Why a reservation that matched nothing was refused. The decision was made
-// atomically by the update; this only names it from a later read.
-const refusedOutcome = (r: VerificationRecord): ReserveOutcome['outcome'] => {
+// atomically by the update; this only names it from a later read. Expiry is
+// judged by the database clock the update used, not this process's clock,
+// which may disagree with it (#105).
+const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveOutcome['outcome'] => {
   if (r.status !== 'pending') return 'not-pending';
-  if (r.expiresAt.getTime() <= Date.now()) return 'expired';
+  if (expired) return 'expired';
   return 'exhausted';
 };
 
@@ -102,9 +104,14 @@ export class PostgresVerifyStore implements VerifyStore {
       [sid],
     );
     if (rows[0]) return { record: this.fromRow(rows[0]), outcome: 'reserved' };
-    const existing = await this.get(sid);
-    if (!existing) return { record: null, outcome: 'not-found' };
-    return { record: existing, outcome: refusedOutcome(existing) };
+    const { rows: found } = await this.pool.query<Row & { db_expired: boolean }>(
+      `SELECT *, expires_at <= NOW() AS db_expired FROM ${this.table} WHERE sid = $1`,
+      [sid],
+    );
+    if (!found[0]) return { record: null, outcome: 'not-found' };
+    const { db_expired: expired, ...row } = found[0];
+    const existing = this.fromRow(row);
+    return { record: existing, outcome: refusedOutcome(existing, expired) };
   }
 
   /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
