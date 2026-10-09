@@ -58,7 +58,7 @@ pnpm test:adapters:mongo-drivers
 
 ## test-tag-releases.sh
 
-Checks `tag-releases.mjs --after-publish` against a registry that lists a new version late: it waits, tags once npm lists the version and shows it as `latest`, waits through the E404 of a first publish, and stops with nothing tagged when the version never appears. Stub `npm`, `git` and `gh` on `PATH` replay a snapshot of the real registry and hide core's current tag and release; every run is `--dry-run`, so nothing is tagged or pushed. Needs `gh` signed in and network access to npm. Not in CI.
+Checks `tag-releases.mjs --after-publish` against a registry that lists a new version late. The script waits for each checked-out version that has no tag or no GitHub release yet; the harness checks that it waits, tags once npm lists the version and shows it as `latest`, waits through the E404 of a first publish, and stops with nothing tagged when the version never appears. Stub `npm`, `git` and `gh` on `PATH` replay a snapshot of the real registry and hide core's current tag and release; every run is `--dry-run`, so nothing is tagged or pushed. Needs `gh` signed in and network access to npm. Not in CI.
 
 ```bash
 scripts/test-tag-releases.sh
