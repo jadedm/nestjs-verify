@@ -160,7 +160,10 @@ today. Changesets bumps a package at major when a release leaves its peer range,
 the PR that adds a core `minor` changeset also widens the range (`<0.8.0`) of every adapter that works
 with the new core, with a changeset for each so npm gets the new range, and an adapter that needs code
 changes gets them in that release. Changesets leaves a range alone while releases stay inside it, so raise
-the lower bound by hand when an adapter starts relying on something newer in core. Because core,
+the lower bound by hand when an adapter starts relying on something newer in core; CI's `packed`
+entries with `--core floor` install the lowest published core each adapter's range admits and fail if an
+adapter imports a value or a public type that core lacks (#76). They cannot see a dependency on newer
+core behaviour, or on a type used only inside an adapter; raising the bound for those is a review call. Because core,
 twilio, postgres and ses share one version line, a minor on one of those three without core would
 put core's next patch on that minor. The check refuses it while the ranges exclude that minor; once
 they admit it, core's next release counts as a new minor and must release the adapters with it. The experimental

@@ -37,6 +37,17 @@ node scripts/smoke-adapters.mjs
 
 The script imports each backend's package only when that backend runs.
 
+## check-packed.mjs
+
+Packs the packages, installs them into a clean project as a consumer would (with each peer at its oldest supported major, `--profile lowest`, or its newest, `--profile highest`), and checks that each loads by name as ESM and CommonJS, ships its types and main files, imports nothing it does not declare, type-checks strictly, and loads without its optional peers.
+
+With `--core floor` it checks only the adapters, each beside the lowest published core its peer range admits, installed from npm (adapters with different ranges run as separate groups). An adapter that imports a value, or names a type in its public types, that the floor core lacks fails until its range's lower bound is raised. A dependency on newer core behaviour, or on a type used only inside the adapter, leaves no trace in the built files and is not caught.
+
+```bash
+node scripts/check-packed.mjs --profile lowest
+node scripts/check-packed.mjs --profile highest --core floor
+```
+
 ## smoke-mongo-drivers.mjs
 
 Runs the Mongo part of the smoke from packed tarballs under each `mongodb` driver the store's peer range accepts (default `5.0.0,5,6`), and checks the driver the store actually loads. The workspace installs driver 6 only.

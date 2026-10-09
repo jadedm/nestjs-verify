@@ -7,6 +7,8 @@
  *
  *   node scripts/check-packed.mjs --profile lowest    each peer's oldest supported major, newest release in it
  *   node scripts/check-packed.mjs --profile highest   each peer at the newest in its range
+ *   ... --core floor   adapters only, beside the lowest published core their
+ *                      peer range admits instead of the workspace's core (#76)
  *
  * `lowest` is the oldest major line, not the exact floor version: the floors
  * of several peers cannot be installed together (Nest 9.0.0 itself needs
@@ -49,8 +51,14 @@ const fail = (message) => {
 
 const profileArg = process.argv.indexOf('--profile');
 const profile = profileArg === -1 ? undefined : process.argv[profileArg + 1];
-if (profile !== 'lowest' && profile !== 'highest') {
-  console.error('usage: node scripts/check-packed.mjs --profile lowest|highest');
+const coreArg = process.argv.indexOf('--core');
+const coreMode = coreArg === -1 ? 'workspace' : process.argv[coreArg + 1];
+// --only a,b: check just these packages (used when floor mode splits the
+// adapters by core range and runs one group per process).
+const onlyArg = process.argv.indexOf('--only');
+const only = onlyArg === -1 ? undefined : new Set(process.argv[onlyArg + 1].split(','));
+if ((profile !== 'lowest' && profile !== 'highest') || (coreMode !== 'workspace' && coreMode !== 'floor')) {
+  console.error('usage: node scripts/check-packed.mjs --profile lowest|highest [--core floor]');
   process.exit(2);
 }
 
@@ -101,7 +109,13 @@ const skipReason = ({ pkg }) => {
   if (!engine || nodeAllowed(engine)) return null;
   return `engines.node ${engine}, running ${process.versions.node}`;
 };
-const withSkip = manifests.map((m) => ({ ...m, skip: skipReason(m) }));
+// With --core floor the core is installed from npm at the lowest version the
+// adapters admit, so only the adapters are packed and checked.
+const CORE = '@jadedm/nestjs-verify';
+const withSkip = manifests
+  .filter(({ pkg }) => coreMode === 'workspace' || pkg.name !== CORE)
+  .filter(({ pkg }) => !only || only.has(pkg.name))
+  .map((m) => ({ ...m, skip: skipReason(m) }));
 for (const m of withSkip.filter((m) => m.skip)) console.log(`SKIP  ${m.pkg.name} (${m.skip})`);
 const checked = withSkip.filter((m) => !m.skip);
 if (checked.length === 0) {
@@ -124,13 +138,88 @@ const peerSpecsOf = () => {
   }
   return new Map([...peers].map(([name, range]) => [name, profile === 'lowest' ? oldestMajor(range) : range]));
 };
+// Floor mode needs an explicit range (`workspace:>=x.y.z <a.b.c`): `workspace:^`
+// and `workspace:*` are rewritten at publish to the version being released,
+// which npm cannot be asked about before it exists.
+const EXPLICIT_RANGE = /^workspace:(>=\s*\d+\.\d+\.\d+\s+<\s*\d+\.\d+\.\d+)$/;
+const coreRangeOf = (pkg) => {
+  const declared = pkg.peerDependencies?.[CORE];
+  const m = declared?.match(EXPLICIT_RANGE);
+  if (!m) throw new Error(`${pkg.name} declares core as "${declared}"; floor mode needs workspace:>=x.y.z <a.b.c`);
+  return m[1];
+};
+// Adapters with different core ranges have different floors: each group runs
+// in its own process (--only), so one adapter can raise its lower bound while
+// the others keep theirs.
+if (coreMode === 'floor' && !only) {
+  const groups = new Map();
+  try {
+    for (const { pkg } of checked) groups.set(coreRangeOf(pkg), [...(groups.get(coreRangeOf(pkg)) ?? []), pkg.name]);
+  } catch (err) {
+    console.error(`check-packed: ${err.message}`);
+    process.exit(1);
+  }
+  if (groups.size > 1) {
+    let failedGroups = 0;
+    for (const [range, names] of groups) {
+      console.log(`\n=== core range "${range}": ${names.join(', ')}`);
+      const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--profile', profile, '--core', 'floor', '--only', names.join(',')], { stdio: 'inherit' });
+      if (child.status !== 0) failedGroups += 1;
+    }
+    console.log(`check-packed (${profile}, core floor, ${groups.size} ranges, node ${process.versions.node}): ${failedGroups ? 'FAILED' : 'passed'}`);
+    process.exit(failedGroups ? 1 : 0);
+  }
+}
+// The lowest published core inside this run's (single) core peer range.
+const coreFloor = () => {
+  const range = coreRangeOf(checked[0].pkg);
+  const listed = run('npm', ['view', `${CORE}@${range}`, 'version', '--json'], { timeout: STEP_TIMEOUT_MS });
+  // npm answers a range nothing satisfies with E404 "No match found"; any
+  // other failure (network, registry) is reported as itself.
+  const noMatch = listed.status !== 0 && /"code":\s*"E404"/.test(listed.stdout) && /No match found/.test(listed.stdout);
+  if (noMatch) throw new Error(`no published ${CORE} satisfies the adapters' peer range "${range}"`);
+  if (listed.status !== 0) throw new Error(`npm view ${CORE}@"${range}" failed: ${tail(listed)}`);
+  const text = listed.stdout.trim();
+  const versions = text ? [JSON.parse(text)].flat() : [];
+  if (versions.length === 0) throw new Error(`no published ${CORE} satisfies the adapters' peer range "${range}"`);
+  return { range, version: versions.sort((a, b) => compare(parseVersion(a), parseVersion(b)))[0] };
+};
+// The floor core's own peers join the install under the same profile, as the
+// workspace core's do in the default mode; otherwise npm adds them itself at
+// their newest and the lowest profile is not lowest for them. Each field is
+// read on its own: asked for two fields, npm drops the wrapper object when
+// the second is absent.
+const npmField = (version, field) => {
+  const view = run('npm', ['view', `${CORE}@${version}`, field, '--json'], { timeout: STEP_TIMEOUT_MS });
+  if (view.status !== 0) throw new Error(`npm view ${CORE}@${version} ${field} failed: ${tail(view)}`);
+  const text = view.stdout.trim();
+  return text ? JSON.parse(text) : {};
+};
+const addFloorCorePeers = (version) => {
+  const peerDependencies = npmField(version, 'peerDependencies');
+  const peerDependenciesMeta = npmField(version, 'peerDependenciesMeta');
+  if (Object.keys(peerDependencies).length === 0) throw new Error(`${CORE}@${version} lists no peers on npm`);
+  for (const [name, range] of Object.entries(peerDependencies)) {
+    const seen = peers.get(name);
+    if (seen !== undefined && seen !== range) throw new Error(`${name} has two peer ranges: "${seen}" and "${range}"`);
+    peers.set(name, range);
+    wanted.set(name, profile === 'lowest' ? oldestMajor(range) : range);
+    if (peerDependenciesMeta[name]?.optional) optionalPeers.add(name);
+  }
+};
 let wanted;
+let floor;
 try {
   wanted = peerSpecsOf();
+  if (coreMode === 'floor') {
+    floor = coreFloor();
+    addFloorCorePeers(floor.version);
+  }
 } catch (err) {
   console.error(`check-packed: ${err.message}`);
   process.exit(1);
 }
+if (floor) console.log(`core floor: ${CORE}@${floor.version} (lowest published in "${floor.range}")`);
 const nodeMajor = process.versions.node.split('.')[0];
 const toolSpecs = ['typescript@5', `@types/node@${nodeMajor}`, 'esbuild@0.24'];
 
@@ -178,7 +267,6 @@ const loadKeys = (projectDir, name, kind) => {
 // --- behaviour probes: things a package must do in a consumer's process that
 // loading alone does not show. Each prints one word; `expect` maps the
 // optional-peer state to that word.
-const CORE = '@jadedm/nestjs-verify';
 // kind: 'esm' (dynamic import), 'cjs' (require), 'module' (a static import,
 // as an app file bundled by esbuild is written).
 const metricsProbe = (kind) => {
@@ -241,6 +329,7 @@ try {
   //    this Node fails here instead of passing with a warning nobody reads.
   writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'nv-consumer', version: '1.0.0', private: true }));
   const peerSpecs = [...wanted].map(([name, spec]) => `${name}@${spec}`);
+  if (floor) peerSpecs.push(`${CORE}@${floor.version}`);
   console.log(`install (${profile}): ${peerSpecs.join(' ')}`);
   const installed = run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error', '--engine-strict', ...tarballs, ...peerSpecs, ...toolSpecs], {
     cwd: projectDir,
@@ -256,6 +345,7 @@ try {
   if (missing.length) throw new Error(`peers not installed: ${missing.join(' ')}`);
   const offMajor = profile === 'lowest' ? resolved.filter(([n, v]) => !inCaret(v, wanted.get(n))) : [];
   if (offMajor.length) throw new Error(`npm installed outside the requested major: ${offMajor.map(([n, v]) => `${n}@${v} (wanted ${wanted.get(n)})`).join(' ')}`);
+  if (floor && versionOf(CORE) !== floor.version) throw new Error(`asked for ${CORE}@${floor.version}, npm installed ${versionOf(CORE)}`);
   console.log(`resolved: ${resolved.map(([n, v]) => `${n}@${v}`).join(' ')}`);
 
   // 3. per package, by name, in the clean project
@@ -338,4 +428,5 @@ try {
   rmSync(projectDir, { recursive: true, force: true });
 }
 
-console.log(`check-packed (${profile}, node ${process.versions.node}): ${process.exitCode ? 'FAILED' : 'passed'}`);
+const coreLabel = floor ? `, core ${floor.version}` : '';
+console.log(`check-packed (${profile}${coreLabel}, node ${process.versions.node}): ${process.exitCode ? 'FAILED' : 'passed'}`);
