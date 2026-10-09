@@ -139,8 +139,10 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
   on a commit the bot did not author, then merge; do not merge with `--admin`. Closing and
   reopening the PR ran CI for 0.6.4 but left 0.6.5 BLOCKED with every check green. It also carries
   Changesets' formatting-only rewrite of `store-redis/package.json`, which changes no version.
-- After a hand publish, npm can take about three minutes to show the new versions; wait before
-  reading a missing version as a failed publish.
+- After a publish, npm can take minutes to list the new versions and move `latest`; wait before
+  reading a missing version as a failed publish. A rerun inside that window fails with E409
+  "previously staged version": wait until `npm view <package>@<version> version` shows it, then
+  rerun.
 - With none, it publishes every package whose local version is not on npm, through npm trusted
   publishing (OIDC, no token). The job upgrades npm to 11 and `scripts/check-publish-env.mjs` fails
   the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 that tried to
@@ -151,7 +153,7 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
   the job's publish fails with E404 and the owner runs the fallback below. #19 stays open until
   trusted publishers exist and one CI publish has gone through.
 
-Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. It ends by running `scripts/tag-releases.mjs`, which tags every published version at its release commit and creates a GitHub release for each package's newest version (`--dry-run` to preview); hand publishes from 0.6.0 to 0.7.0 created no tags, so the repo showed 0.5.0 until #91. npm
+Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. It ends by running `scripts/tag-releases.mjs --after-publish`, which waits until npm lists each checked-out version that has no tag or no release yet and, unless it is a prerelease, shows it as `latest` (up to `TAG_RELEASES_WAIT_SECONDS`, default 600), then tags every published version at its release commit and creates a GitHub release for each package's newest version (`--dry-run` to preview). Without the wait it ran before npm listed 0.8.1, reported clean and tagged nothing (#111); hand publishes from 0.6.0 to 0.7.0 created no tags, so the repo showed 0.5.0 until #91. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
 agent's shell) the publish fails with `EOTP`, so hand the command over. Every version so far
 (through 0.7.0, 9 Oct 2026) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
