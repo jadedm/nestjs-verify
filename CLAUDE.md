@@ -148,7 +148,7 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
 Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
 agent's shell) the publish fails with `EOTP`, so hand the command over. Every version so far
-(through postgres 0.6.12) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
+(through 0.7.0, 9 Oct 2026) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
 
