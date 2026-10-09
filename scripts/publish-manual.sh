@@ -37,6 +37,10 @@ published() {
   exit 1
 }
 
+# The tagging step after the publish needs gh; check it before publishing
+# anything, not after.
+gh auth status >/dev/null 2>&1 || { echo "gh is not signed in; run: gh auth login" >&2; exit 1; }
+
 pnpm install --frozen-lockfile
 pnpm build
 
@@ -56,3 +60,7 @@ for dir in packages/*; do
   (cd "$dir" && pnpm publish --access public --no-git-checks ${otp_args[@]+"${otp_args[@]}"})
   echo "published $name@$version"
 done
+
+# pnpm publish creates no git tag, so tag every published version and release
+# each package's newest one (#91). Needs `gh` signed in to this repository.
+node scripts/tag-releases.mjs

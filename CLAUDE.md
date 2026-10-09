@@ -145,7 +145,7 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
   the job's publish fails with E404 and the owner runs the fallback below. #19 stays open until
   trusted publishers exist and one CI publish has gone through.
 
-Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. npm
+Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. It ends by running `scripts/tag-releases.mjs`, which tags every published version at its release commit and creates a GitHub release for each package's newest version (`--dry-run` to preview); hand publishes from 0.6.0 to 0.7.0 created no tags, so the repo showed 0.5.0 until #91. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
 agent's shell) the publish fails with `EOTP`, so hand the command over. Every version so far
 (through 0.7.0, 9 Oct 2026) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
