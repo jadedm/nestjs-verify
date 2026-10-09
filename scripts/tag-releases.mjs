@@ -22,7 +22,8 @@
 // each checked-out version that has no tag on origin yet, and shows it as
 // latest unless it is a prerelease; past TAG_RELEASES_WAIT_SECONDS (default
 // 600) it stops with nothing tagged and names what npm still lacks. It then
-// refuses to finish unless each of those versions is tagged and released.
+// refuses to finish unless each of those versions is tagged and released
+// (a prerelease only tagged).
 //
 // Usage: node scripts/tag-releases.mjs [--dry-run] [--after-publish]
 import { execFileSync } from 'node:child_process';
@@ -78,10 +79,15 @@ const npmView = (name) => {
 };
 
 // The versions a run after a publish waits for: each package's checked-out
-// version that has no tag on origin yet. A version tagged before is never
-// waited on again, so moving `latest` back to an older version on purpose
-// does not stall every later run.
-const awaited = afterPublish ? packages.filter(({ pkg }) => !existingTags.has(`${pkg.name}@${pkg.version}`)) : [];
+// version that has no tag on origin yet, or (unless a prerelease) no GitHub
+// release yet, so a rerun after a failed release still waits for it. A
+// version tagged and released before is never waited on again, so moving
+// `latest` back to an older version on purpose does not stall later runs.
+const unfinished = ({ pkg }) => {
+  const tag = `${pkg.name}@${pkg.version}`;
+  return !existingTags.has(tag) || (!pkg.version.includes('-') && !existingReleases.has(tag));
+};
+const awaited = afterPublish ? packages.filter(unfinished) : [];
 
 const notYetOnNpm = () =>
   awaited.flatMap(({ pkg }) => {
@@ -155,7 +161,8 @@ for (const { dir, pkg } of packages) {
     }
     toTag.push({ tag, sha });
   }
-  // npm's latest tag, so a prerelease is never released as the newest.
+  // npm's latest tag, so a prerelease published under another dist-tag is not
+  // released as the newest.
   const newest = sh('npm', ['view', pkg.name, 'dist-tags.latest', '--prefer-online']);
   const tag = `${pkg.name}@${newest}`;
   if (existingReleases.has(tag)) continue;
@@ -173,7 +180,7 @@ for (const { dir, pkg } of packages) {
 // wait saw on npm is tagged here, and released unless it is a prerelease.
 for (const { pkg } of awaited) {
   const tag = `${pkg.name}@${pkg.version}`;
-  if (!toTag.some((t) => t.tag === tag)) problems.push(`${tag} was on npm during the wait but the tagging pass did not list it; rerun`);
+  if (!existingTags.has(tag) && !toTag.some((t) => t.tag === tag)) problems.push(`${tag} was on npm during the wait but the tagging pass did not list it; rerun`);
   const released = existingReleases.has(tag) || toRelease.some((r) => r.tag === tag);
   if (!pkg.version.includes('-') && !released) problems.push(`${tag} was latest on npm during the wait but the release pass did not see it as latest; rerun`);
 }
