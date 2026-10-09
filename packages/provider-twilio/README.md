@@ -41,9 +41,9 @@ When any attempt may have been accepted by Twilio (HTTP 500, 502 or 504, a respo
 - `@jadedm/nestjs-verify` within the range in `peerDependencies`
 - `twilio` 4.x or 5.x
 
-## Consulting
+## Help
 
-If you need a custom SMS provider adapter or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+If you need a custom SMS provider adapter, or help shipping this into production, [Inoltro](https://inoltro.ai) is my studio.
 
 ## License
 

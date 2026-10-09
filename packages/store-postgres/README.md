@@ -83,9 +83,9 @@ Each store also accepts `tableName`. It changes only the queries, not what the m
 - `@jadedm/nestjs-verify` within the range in `peerDependencies`
 - `pg` 8.x
 
-## Consulting
+## Help
 
-If you need a custom store adapter, schema migration help, or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+If you need a custom store adapter, schema migration help, or help shipping this into production, [Inoltro](https://inoltro.ai) is my studio.
 
 ## License
 

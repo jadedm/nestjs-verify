@@ -1,6 +1,6 @@
 # @jadedm/nestjs-verify-mongo
 
-MongoDB store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/package/@jadedm/nestjs-verify). Provides the `VerifyStore` and `AbuseStore` implementations.
+MongoDB store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/package/@jadedm/nestjs-verify). Provides all five stores (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `PhoneIndexStore`) and an audit sink, plus the schema migrations.
 
 ```bash
 pnpm add @jadedm/nestjs-verify-mongo mongodb
@@ -8,35 +8,29 @@ pnpm add @jadedm/nestjs-verify-mongo mongodb
 
 ## Usage
 
+`createMongoStores` builds all five stores and the audit sink on one `Db` and runs the schema migrations (collections and TTL indexes) before returning:
+
 ```ts
 import { VerifyModule } from '@jadedm/nestjs-verify';
-import { MongoVerifyStore, MongoAbuseStore } from '@jadedm/nestjs-verify-mongo';
+import { createMongoStores } from '@jadedm/nestjs-verify-mongo';
 
 VerifyModule.forRootAsync({
   useFactory: async () => {
-    const verify = new MongoVerifyStore({
+    const { audit, close, ...stores } = await createMongoStores({
       uri: process.env.MONGO_URI!,
       databaseName: 'app',
     });
-    const abuse = new MongoAbuseStore({
-      uri: process.env.MONGO_URI!,
-      databaseName: 'app',
-    });
-    await verify.ensureIndexes();
-    await abuse.ensureIndexes();
     return {
       sms: { /* ... */ },
-      stores: { verify, abuse },
+      stores: { ...stores, audit },
     };
   },
 });
 ```
 
-If you already have a MongoClient or a Mongoose connection, pass the `Db` directly instead of a connection string:
+When the factory opens its own client from `uri`, it returns `close()`; call it on shutdown. If you already have a MongoClient or a Mongoose connection, pass the `Db` instead (`createMongoStores({ db: existingDb })`); the client then stays yours to close. Migrations run under a lock document, so several instances starting at once take turns. With `skipSchemaSetup: true` the factory only checks the schema version.
 
-```ts
-new MongoVerifyStore({ db: existingDb });
-```
+The stores can also be built one at a time (see Construction options), for example to put the short-lived ones in Redis. The core requires `verify`, `rateLimit`, `cooldown` and `phoneIndex`; `abuse` (the velocity check) and `audit` are optional.
 
 Mongoose users: `mongooseConnection.db` returns the underlying `Db`.
 
@@ -46,7 +40,7 @@ Mongoose users: `mongooseConnection.db` returns the underlying `Db`.
 
 ## TTL
 
-`ensureIndexes()` creates a TTL index on `expiresAt`. Mongo's TTL sweeper runs about once per minute, so expired records may exist for up to 60 seconds past `expiresAt`. Reads in the core library check `expiresAt` explicitly and treat stale records as expired.
+The migrations create a TTL index on `expiresAt` (a store built on its own creates its indexes with `ensureIndexes()`). Mongo's TTL sweeper runs about once per minute, so expired records may exist for up to 60 seconds past `expiresAt`. Reads in the core library check `expiresAt` explicitly and treat stale records as expired.
 
 ## Construction options
 
@@ -74,9 +68,9 @@ new MongoAbuseStore({
 
 Mongoose users can use this adapter directly. There is no separate `nestjs-verify-mongoose` package because Mongoose's `connection.db` exposes the same `Db` interface this adapter consumes.
 
-## Consulting
+## Help
 
-If you need a custom store adapter, schema design help, or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+If you need a custom store adapter, schema design help, or help shipping this into production, [Inoltro](https://inoltro.ai) is my studio.
 
 ## License
 

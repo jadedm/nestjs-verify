@@ -4,7 +4,7 @@ Operational scripts for this repo. Not shipped to npm.
 
 ## smoke-adapters.mjs
 
-Live integration smoke for the Postgres and Mongo store adapters. Exercises the full `VerifyStore` and `AbuseStore` contracts against real databases and asserts each invariant. Use this before cutting a release that touches the adapters, or to verify that a published version still works on a target stack.
+Live integration smoke for the Postgres, Mongo and Redis store adapters. Exercises every store contract (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `PhoneIndexStore`) and the audit sinks against real databases, runs a whole email verification through `VerifyService` on each backend, and asserts each invariant. Use this before cutting a release that touches the adapters, or to verify that a published version still works on a target stack.
 
 ### One-shot run
 
@@ -12,7 +12,7 @@ Live integration smoke for the Postgres and Mongo store adapters. Exercises the 
 pnpm test:adapters
 ```
 
-This spins up Postgres 16 and Mongo 7 in containers, runs the smoke script, and tears them down. Requires Docker.
+This spins up Postgres 16, Mongo 7 and Redis 7 in containers, runs the smoke script, and tears them down. Requires Docker.
 
 ### Manual run
 
@@ -25,18 +25,29 @@ docker compose -f scripts/docker-compose.smoke.yml down -v
 
 ### Pointing at existing databases
 
-Set environment variables to point the script at any reachable Postgres or Mongo:
+Set environment variables to point the script at any reachable Postgres, Mongo or Redis, and `SMOKE_BACKENDS` to run only some of them (default `postgres,mongo,redis`):
 
 ```bash
 SMOKE_PG_URL=postgres://user:pass@host:5432/db \
 SMOKE_MG_URL=mongodb://host:27017 \
 SMOKE_MG_DB=verify_smoke \
+SMOKE_REDIS_HOST=localhost SMOKE_REDIS_PORT=6379 \
 node scripts/smoke-adapters.mjs
 ```
 
-### What it asserts
+The script imports each backend's package only when that backend runs.
 
-For each store, 13 invariants. For each abuse store, 3 invariants.
+## smoke-mongo-drivers.mjs
+
+Runs the Mongo part of the smoke from packed tarballs under each `mongodb` driver the store's peer range accepts (default `5.0.0,5,6`), and checks the driver the store actually loads. The workspace installs driver 6 only.
+
+```bash
+pnpm test:adapters:mongo-drivers
+```
+
+### What smoke-adapters asserts
+
+The table lists the `VerifyStore` and `AbuseStore` invariants. The script also checks the rate-limit, cooldown (including atomic claims: one winner of ten simultaneous claims) and phone-index stores, the audit sinks, the Mongo migration lock, and whole verifications through `VerifyService`, including five simultaneous starts sending one code.
 
 | # | Invariant |
 |---|---|

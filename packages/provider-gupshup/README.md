@@ -73,9 +73,9 @@ VerifyModule.forRoot({
 
 No SDK dependency. The adapter uses the global `fetch`. You can pass your own `fetchImpl` for tests or for environments that need a custom HTTP client.
 
-## Consulting
+## Help
 
-If you need a custom SMS provider adapter, an India-market integration pattern, or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+If you need a custom SMS provider adapter, an India-market integration pattern, or help shipping this into production, [Inoltro](https://inoltro.ai) is my studio.
 
 ## License
 
