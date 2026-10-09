@@ -26,6 +26,21 @@ interface Row {
   expires_at: Date;
 }
 
+// The shape of core's ReserveResult, written out so this store's published
+// types do not need a core that exports it (its peer range starts at 0.6.8).
+type ReserveOutcome = {
+  record: VerificationRecord | null;
+  outcome: 'reserved' | 'exhausted' | 'expired' | 'not-pending' | 'not-found';
+};
+
+// Why a reservation that matched nothing was refused. The decision was made
+// atomically by the update; this only names it from a later read.
+const refusedOutcome = (r: VerificationRecord): ReserveOutcome['outcome'] => {
+  if (r.status !== 'pending') return 'not-pending';
+  if (r.expiresAt.getTime() <= Date.now()) return 'expired';
+  return 'exhausted';
+};
+
 export class PostgresVerifyStore implements VerifyStore {
   private readonly pool: Pool;
   private readonly table: string;
@@ -73,6 +88,26 @@ export class PostgresVerifyStore implements VerifyStore {
     return rows[0] ? this.fromRow(rows[0]) : null;
   }
 
+  /**
+   * One UPDATE reserves the attempt: it matches only a pending row below its
+   * maximum, so concurrent reservations take turns on the row lock and at most
+   * max_attempts of them succeed. The status is never changed here.
+   */
+  async reserveAttempt(sid: string): Promise<ReserveOutcome> {
+    const { rows } = await this.pool.query<Row>(
+      `UPDATE ${this.table}
+       SET attempts = attempts + 1
+       WHERE sid = $1 AND status = 'pending' AND attempts < max_attempts AND expires_at > NOW()
+       RETURNING *`,
+      [sid],
+    );
+    if (rows[0]) return { record: this.fromRow(rows[0]), outcome: 'reserved' };
+    const existing = await this.get(sid);
+    if (!existing) return { record: null, outcome: 'not-found' };
+    return { record: existing, outcome: refusedOutcome(existing) };
+  }
+
+  /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
   async incrementAttempts(sid: string): Promise<IncrementResult> {
     // Atomic: increment AND conditionally flip status to 'canceled' if the
     // new count reaches max_attempts. Single round-trip, RETURNING the new

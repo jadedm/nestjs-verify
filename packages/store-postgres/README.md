@@ -58,7 +58,7 @@ To manage the schema yourself, pass `skipSchemaSetup: true`: no DDL runs, and st
 
 ## Atomicity
 
-`incrementAttempts` uses a single `UPDATE ... RETURNING` with a conditional `CASE` to increment the counter and conditionally transition the row to `canceled` when `max_attempts` is reached. One round trip, no race.
+`reserveAttempt` is a single `UPDATE ... RETURNING` that increments the counter only while the row is `pending` and below `max_attempts`, so of any number of simultaneous checks at most `max_attempts` get to compare a code. The deprecated `incrementAttempts` is kept for direct callers.
 
 ## Individual stores
 

@@ -126,6 +126,10 @@ export class VerifyService {
     if (missing.length > 0) {
       throw new Error(`stores.cooldown must implement ${missing.join(' and ')} (required since 0.7.0, #13).`);
     }
+    const verify = options.stores.verify as unknown as Record<string, unknown>;
+    if (typeof verify.reserveAttempt !== 'function') {
+      throw new Error('stores.verify must implement reserveAttempt (required since 0.8.0).');
+    }
     const phoneIndex = options.stores.phoneIndex as unknown as Record<string, unknown>;
     if (typeof phoneIndex.deleteIfMatches !== 'function') {
       throw new Error('stores.phoneIndex must implement deleteIfMatches (required since 0.7.0, #9).');
@@ -376,19 +380,29 @@ export class VerifyService {
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
-    if (record.expiresAt.getTime() <= Date.now()) {
-      await this.options.stores.verify.markStatus(sid, 'expired');
-      await this.dropIndexEntry(phone, sid, 'an expired verification');
-      this.metrics.checksTotal(CHECK_OUTCOME.Expired);
+    if (record.expiresAt.getTime() <= Date.now()) throw await this.expire(phone, sid, record.channel, params.ip, checkStart);
+
+    // The attempt is counted before the code is compared. A reservation is
+    // atomic and refused once maxAttempts are spent, so of any number of
+    // simultaneous checks at most maxAttempts compare a code. Comparing first
+    // let every check already in flight compare before the lockout landed.
+    const { record: reserved, outcome: reservation } =
+      await this.options.stores.verify.reserveAttempt(sid);
+    if (reservation === 'not-found' || !reserved) {
+      await this.dropIndexEntry(phone, sid, 'a missing verification');
+      this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
       this.metrics.checkDuration((Date.now() - checkStart) / 1000);
-      await this.audit({
-        type: 'verification_expired',
-        sid,
-        phoneRedacted: this.redact(phone),
-        ip: params.ip,
-        channel: record.channel,
-      });
-      throw new CodeExpiredException();
+      throw new NoPendingVerificationException();
+    }
+    if (reservation === 'expired') throw await this.expire(phone, sid, record.channel, params.ip, checkStart);
+    if (reservation !== 'reserved') {
+      // Every attempt spent, possibly by checks still in flight, or finished
+      // meanwhile: no code is compared and nothing is written. A reservation
+      // holder still comparing decides the record (approve, or cancel on the
+      // last wrong code); cancelling here would refuse its correct code.
+      this.metrics.checksTotal(reservation === 'exhausted' ? CHECK_OUTCOME.LockedOut : CHECK_OUTCOME.NoPending);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
     const expectedHash = hashCode(params.code, record.salt);
@@ -423,13 +437,19 @@ export class VerifyService {
       };
     }
 
-    const { record: updated, outcome } =
-      await this.options.stores.verify.incrementAttempts(sid);
-    const attemptsRemaining = updated
-      ? Math.max(0, updated.maxAttempts - updated.attempts)
-      : 0;
-
-    if (outcome === 'locked-out') {
+    // A wrong code that spent the last attempt cancels the record. A correct
+    // code reserved in the same moment may lose to this write and answer
+    // canceled: the check fails closed rather than allowing an extra guess.
+    const attemptsRemaining = Math.max(0, reserved.maxAttempts - reserved.attempts);
+    if (attemptsRemaining === 0) {
+      const lockedOut = await this.options.stores.verify.markStatus(sid, 'canceled');
+      if (!lockedOut) {
+        // A correct code reserved alongside this one approved the record first:
+        // this wrong code is refused, and nothing was locked out.
+        this.metrics.checksTotal(CHECK_OUTCOME.WrongCode);
+        this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+        return { sid, state: 'canceled', attemptsRemaining: 0 };
+      }
       this.vlog(`check: locked out sid=${sid} after exhausting attempts`);
       await this.dropIndexEntry(phone, sid, 'a locked-out verification');
       this.metrics.checksTotal(CHECK_OUTCOME.LockedOut);
@@ -441,7 +461,7 @@ export class VerifyService {
         ip: params.ip,
         channel: record.channel,
         outcome: 'locked_out',
-        meta: { attempts: updated?.attempts, maxAttempts: updated?.maxAttempts },
+        meta: { attempts: reserved.attempts, maxAttempts: reserved.maxAttempts },
       });
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
@@ -639,6 +659,28 @@ export class VerifyService {
       Promise.resolve().then(() => this.options.stores.phoneIndex.deleteIfMatches(phone, sid)),
     );
     if (err) this.log.warn(`check: index cleanup for ${what} did not complete: ${err.message}`);
+  }
+
+  /** Marks an expired record, drops its index entry, records it, and returns the 400. */
+  private async expire(
+    phone: string,
+    sid: string,
+    channel: VerificationChannel,
+    ip: string | undefined,
+    checkStart: number,
+  ): Promise<CodeExpiredException> {
+    await this.options.stores.verify.markStatus(sid, 'expired');
+    await this.dropIndexEntry(phone, sid, 'an expired verification');
+    this.metrics.checksTotal(CHECK_OUTCOME.Expired);
+    this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+    await this.audit({
+      type: 'verification_expired',
+      sid,
+      phoneRedacted: this.redact(phone),
+      ip,
+      channel,
+    });
+    return new CodeExpiredException();
   }
 
   /** Runs one cleanup step after a failed start; a failure is logged, never thrown. */

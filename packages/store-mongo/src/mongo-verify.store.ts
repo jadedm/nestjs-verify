@@ -36,6 +36,21 @@ interface VerificationDoc {
   expiresAt: Date;
 }
 
+// The shape of core's ReserveResult, written out so this store's published
+// types do not need a core that exports it (its peer range starts at 0.6.8).
+type ReserveOutcome = {
+  record: VerificationRecord | null;
+  outcome: 'reserved' | 'exhausted' | 'expired' | 'not-pending' | 'not-found';
+};
+
+// Why a reservation that matched nothing was refused. The decision was made
+// atomically by the update; this only names it from a later read.
+const refusedOutcome = (r: VerificationRecord): ReserveOutcome['outcome'] => {
+  if (r.status !== 'pending') return 'not-pending';
+  if (r.expiresAt.getTime() <= Date.now()) return 'expired';
+  return 'exhausted';
+};
+
 export class MongoVerifyStore implements VerifyStore {
   private readonly col: Collection<VerificationDoc>;
   private readonly ownedClient?: MongoClient;
@@ -77,6 +92,30 @@ export class MongoVerifyStore implements VerifyStore {
     return doc ? this.toRecord(doc) : null;
   }
 
+  /**
+   * One findOneAndUpdate reserves the attempt: the filter matches only a
+   * pending document below its maximum, so at most maxAttempts concurrent
+   * reservations succeed. The status is never changed here. The result is
+   * read as { value } under drivers 5 and 6 (#79).
+   */
+  async reserveAttempt(sid: string): Promise<ReserveOutcome> {
+    const result = await this.col.findOneAndUpdate(
+      {
+        _id: sid,
+        status: 'pending',
+        $expr: { $and: [{ $lt: ['$attempts', '$maxAttempts'] }, { $gt: ['$expiresAt', '$$NOW'] }] },
+      },
+      { $inc: { attempts: 1 } },
+      { returnDocument: 'after', includeResultMetadata: true },
+    );
+    if (result.value) return { record: this.toRecord(result.value), outcome: 'reserved' };
+    const existing = await this.col.findOne({ _id: sid });
+    if (!existing) return { record: null, outcome: 'not-found' };
+    const record = this.toRecord(existing);
+    return { record, outcome: refusedOutcome(record) };
+  }
+
+  /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
   async incrementAttempts(sid: string): Promise<IncrementResult> {
     // Atomic: increment AND conditionally flip status to 'canceled' if the
     // new count reaches max_attempts. Single round-trip via aggregation-
