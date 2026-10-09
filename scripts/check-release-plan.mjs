@@ -35,14 +35,28 @@ const MONGO = '@jadedm/nestjs-verify-mongo';
 const packages = await getPackages(root);
 const config = await readConfig(root, packages);
 const versionOf = (name) => packages.packages.find((p) => p.packageJson.name === name).packageJson.version;
-// Prerelease mode (.changeset/pre.json) changes the plan; read it as the CLI does.
-const preState = await readPreState(root);
+// Prerelease mode (.changeset/pre.json) is not supported: Changesets' peer
+// range check excludes prereleases, so every plan in it, even a plain core
+// patch, carries the adapters to a major. Refuse it with one clear message
+// rather than a failure per probe.
+const readPre = await readPreState(root);
+if (readPre?.mode === 'pre') {
+  console.error(`check-release-plan: prerelease mode ("${readPre.tag}") is not supported; run \`changeset pre exit\` first`);
+  process.exit(1);
+}
+// After `changeset pre exit`, pre.json stays (mode "exit") until `changeset
+// version` removes it. The pending plan keeps that state, as the version run
+// will (it adds stable releases for packages that had prereleases); the
+// probes, which test the config rather than what is pending, plan without it.
+const preState = readPre;
 const linkedWith = (name) => config.linked.find((group) => group.includes(name)) ?? [name];
 const highest = (versions) => versions.reduce((a, b) => (semver.gt(b, a) ? b : a));
 
-const planFor = (changesets, pkgs = packages) =>
+// `pre` has no default: a probe passes undefined on purpose, which a default
+// parameter would silently replace with the pending pre-state.
+const planFor = (changesets, pkgs, pre) =>
   Object.fromEntries(
-    assembleReleasePlan(changesets, pkgs, config, preState)
+    assembleReleasePlan(changesets, pkgs, config, pre)
       .releases.filter((r) => r.type !== 'none')
       .map((r) => [r.name, r.newVersion]),
   );
@@ -57,17 +71,20 @@ const outOfRange = (coreVersion) =>
     .filter(({ range }) => !semver.satisfies(coreVersion, range));
 
 // The packages with every adapter's core range widened to admit `coreVersion`,
-// as the PR preparing that minor would. Nothing is written to disk.
+// as the PR preparing that minor would: from the range's lowest version up to
+// the next minor, whatever shape the range has (`>=a <b`, `^a`, `~a`, `a.x`).
+// Nothing is written to disk.
 const widenedTo = (coreVersion) => {
   const upper = `${semver.major(coreVersion)}.${semver.minor(coreVersion) + 1}.0`;
   const clone = structuredClone(packages);
   for (const p of clone.packages) {
-    const range = p.packageJson.peerDependencies?.[CORE];
-    if (!range) continue;
-    if (!/<\s*[\d.]+$/.test(range)) {
-      throw new Error(`${p.packageJson.name}: core peer range "${range}" does not end in "<x.y.z"; the probes cannot widen it`);
-    }
-    p.packageJson.peerDependencies[CORE] = range.replace(/<\s*[\d.]+$/, `<${upper}`);
+    const declared = p.packageJson.peerDependencies?.[CORE];
+    if (!declared) continue;
+    const prefix = declared.startsWith('workspace:') ? 'workspace:' : '';
+    const range = declared.slice(prefix.length);
+    const floor = semver.validRange(range) ? semver.minVersion(range) : null;
+    if (!floor) throw new Error(`${p.packageJson.name}: core peer range "${declared}" is not a semver range the probes can widen`);
+    p.packageJson.peerDependencies[CORE] = `${prefix}>=${floor.version} <${upper}`;
   }
   return clone;
 };
@@ -76,7 +93,7 @@ const failures = [];
 
 // 1. What the pending changesets would release.
 const pending = await readChangesets(root);
-const pendingPlan = planFor(pending);
+const pendingPlan = planFor(pending, packages, preState);
 const pendingTooHigh = atOneOrAbove(pendingPlan);
 // When the cascade has already carried core to 1.0.0, name the 0.x minor the
 // changesets asked for, which is the version the ranges need to admit.
@@ -84,8 +101,12 @@ const coreAsked = (v) => (v && semver.major(v) > semver.major(versionOf(CORE)) ?
 const coreNext = coreAsked(pendingPlan[CORE]);
 const toWiden = coreNext ? outOfRange(coreNext) : [];
 console.log(`${pendingTooHigh.length ? 'FAIL' : 'ok  '}  pending (${pending.length} changeset(s)): ${show(pendingPlan)}`);
+// An explicit core major asks for 1.0.0; telling it to widen ranges to the
+// next 0.x minor would be wrong advice.
+// A major on any package in core's linked group carries core there too.
+const coreMajorAsked = pending.some((cs) => cs.releases.some((r) => linkedWith(CORE).includes(r.name) && r.type === 'major'));
 if (pendingTooHigh.length > 0) {
-  const hint = toWiden.length
+  const hint = toWiden.length && !coreMajorAsked
     ? ` Core goes to ${coreNext}, outside the core peer range of: ${toWiden.map((a) => `${a.name} (${a.range})`).join(', ')}. Widen each range that works with core ${coreNext} and add a changeset for it.`
     : '';
   failures.push(`pending changesets plan ${pendingTooHigh.join(', ')} at 1.0.0 or above.${hint}`);
@@ -96,14 +117,33 @@ if (pendingTooHigh.length > 0) {
 // outside the adapter ranges, and Changesets would then rewrite those ranges
 // to an unbounded `>=`. So the version core takes now, or on its next patch,
 // must stay inside every adapter's range.
-const coreNextRelease =
-  pendingPlan[CORE] ??
-  semver.inc(highest(linkedWith(CORE).map((n) => pendingPlan[n] ?? versionOf(n))), 'patch');
-const strandedBy = pendingTooHigh.length === 0 ? outOfRange(coreNextRelease) : [];
-if (strandedBy.length > 0) {
-  const via = pendingPlan[CORE] ? '' : ` (its next patch, after ${linkedWith(CORE).filter((n) => pendingPlan[n]).join(', ')} release)`;
-  console.log(`FAIL  pending: core ${coreNextRelease}${via} is outside the range of ${strandedBy.map((a) => a.name).join(', ')}`);
-  failures.push(`core would release as ${coreNextRelease}${via}, outside the core peer range of ${strandedBy.map((a) => `${a.name} (${a.range})`).join(', ')}. Release core in the same change and widen those ranges, or keep the linked package on a patch.`);
+// When core is pending, its next patch after this release must fit too.
+const linkedPending = linkedWith(CORE).filter((n) => n !== CORE && pendingPlan[n]);
+// Each candidate carries the advice that fits how it would happen.
+const WIDEN_WITH_CORE = 'Release core in the same change and widen those ranges, or keep the linked package on a patch.';
+const coreCandidates = pendingPlan[CORE]
+  ? [
+      { version: pendingPlan[CORE], via: '', fix: 'Widen those ranges in this change and release each adapter.' },
+      {
+        version: semver.inc(pendingPlan[CORE], 'patch'),
+        via: ' (its next patch after this release)',
+        fix: 'End those ranges at a minor (for example <0.8.0), not at a patch.',
+      },
+    ]
+  : [
+      {
+        version: semver.inc(highest(linkedWith(CORE).map((n) => pendingPlan[n] ?? versionOf(n))), 'patch'),
+        via: linkedPending.length
+          ? ` (its next patch, after ${linkedPending.join(', ')} release)`
+          : ' (its next patch from the versions already in package.json)',
+        fix: linkedPending.length ? WIDEN_WITH_CORE : 'Widen those ranges to admit it and release each adapter.',
+      },
+    ];
+const stranded = pendingTooHigh.length === 0 ? coreCandidates.find((c) => outOfRange(c.version).length > 0) : undefined;
+if (stranded) {
+  const strandedBy = outOfRange(stranded.version);
+  console.log(`FAIL  pending: core ${stranded.version}${stranded.via} is outside the range of ${strandedBy.map((a) => a.name).join(', ')}`);
+  failures.push(`core would release as ${stranded.version}${stranded.via}, outside the core peer range of ${strandedBy.map((a) => `${a.name} (${a.range})`).join(', ')}. ${stranded.fix}`);
 }
 
 // A core release into a new minor needs every adapter that admits it released
@@ -123,7 +163,7 @@ if (notReleased.length > 0) {
 // 2. Probes: what a core release does to the adapters, given the config.
 const probe = (name, releases, pkgs, expect) => {
   const changeset = { id: 'release-plan-probe', summary: name, releases: Object.entries(releases).map(([n, type]) => ({ name: n, type })) };
-  const plan = planFor([changeset], pkgs);
+  const plan = planFor([changeset], pkgs, undefined);
   const same = JSON.stringify(Object.keys(plan).sort()) === JSON.stringify([...expect].sort());
   const tooHigh = atOneOrAbove(plan);
   console.log(`${same && tooHigh.length === 0 ? 'ok  ' : 'FAIL'}  probe ${name}: ${show(plan)}`);
