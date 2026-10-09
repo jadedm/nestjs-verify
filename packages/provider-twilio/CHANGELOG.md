@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify-twilio
 
+## 0.8.0
+
+### Patch Changes
+
+- a2637d3: Accepts `@jadedm/nestjs-verify` 0.8 as a peer (`>=0.6.8 <0.9.0`).
+
 ## 0.7.0
 
 ### Patch Changes

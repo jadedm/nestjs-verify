@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify-gupshup",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "Gupshup SMS provider adapter for @jadedm/nestjs-verify. India and SEA SMS dispatch.",
   "keywords": [
     "nestjs",
