@@ -9,6 +9,11 @@
 # is reused for every package and lasts about 30 seconds, so a later publish
 # can fail with EOTP; rerun, and the packages already published are skipped.
 #
+# E409 "previously staged version" means npm already holds that version and
+# has not listed it yet. Do not rerun at once: wait until
+# `npm view <package>@<version> version` prints the version, then rerun; the
+# packages already published are skipped and the tagging step runs.
+#
 # Usage: scripts/publish-manual.sh [--otp <code>]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -63,4 +68,6 @@ done
 
 # pnpm publish creates no git tag, so tag every published version and release
 # each package's newest one (#91). Needs `gh` signed in to this repository.
-node scripts/tag-releases.mjs
+# --after-publish waits for npm to list what was just published; without it
+# the run sees nothing new for a few minutes and tags nothing (#111).
+node scripts/tag-releases.mjs --after-publish

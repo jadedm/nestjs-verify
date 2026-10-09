@@ -56,6 +56,14 @@ Runs the Mongo part of the smoke from packed tarballs under each `mongodb` drive
 pnpm test:adapters:mongo-drivers
 ```
 
+## test-tag-releases.sh
+
+Checks `tag-releases.mjs --after-publish` against a registry that lists a new version late: it waits, tags once npm lists the version and shows it as `latest`, waits through the E404 of a first publish, and stops with nothing tagged when the version never appears. Stub `npm`, `git` and `gh` on `PATH` replay a snapshot of the real registry and hide core's current tag and release; every run is `--dry-run`, so nothing is tagged or pushed. Needs `gh` signed in and network access to npm. Not in CI.
+
+```bash
+scripts/test-tag-releases.sh
+```
+
 ### What smoke-adapters asserts
 
 The table lists the `VerifyStore` and `AbuseStore` invariants (`incrementAttempts` is deprecated but still exercised). `reserveAttempt` is checked too: exactly 3 of 10 simultaneous reservations succeed on a record with three attempts, and it never changes the status. The script also checks the rate-limit, cooldown (including atomic claims: one winner of ten simultaneous claims) and phone-index stores, the audit sinks, the Mongo migration lock, and whole verifications through `VerifyService`, including five simultaneous starts sending one code and a burst of wrong checks spending exactly the attempt limit.

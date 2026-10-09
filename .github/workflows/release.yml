@@ -126,7 +126,7 @@ jobs:
       # Provenance is automatic. A version already on npm is skipped.
       - run: pnpm changeset publish
       # Tags every published version and releases each package's newest one,
-      # as a hand publish does (#91).
-      - run: node scripts/tag-releases.mjs
+      # as a hand publish does (#91), once npm lists them (#111).
+      - run: node scripts/tag-releases.mjs --after-publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
