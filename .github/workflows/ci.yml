@@ -48,7 +48,11 @@ jobs:
           - { node: 20, profile: highest }
           - { node: 22, profile: lowest }
           - { node: 22, profile: highest }
-    name: packed (node ${{ matrix.node }}, ${{ matrix.profile }})
+          # Adapters beside the lowest published core their peer range
+          # admits, from npm, rather than the workspace's core (#76).
+          - { node: 18, profile: lowest, core: floor }
+          - { node: 22, profile: highest, core: floor }
+    name: packed (node ${{ matrix.node }}, ${{ matrix.profile }}${{ matrix.core == 'floor' && ', core floor' || '' }})
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -63,7 +67,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node scripts/check-packed.mjs --profile ${{ matrix.profile }}
+      - run: node scripts/check-packed.mjs --profile ${{ matrix.profile }} ${{ matrix.core == 'floor' && '--core floor' || '' }}
 
   adapters:
     runs-on: ubuntu-latest
