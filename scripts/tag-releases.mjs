@@ -18,13 +18,12 @@
 //
 // --after-publish, for a run straight after a publish: npm takes minutes to
 // list a new version or move `latest` to it, and until then this script
-// sees nothing new and reports clean (#111). It first waits until npm lists
-// each checked-out version that has no tag on origin yet, or no GitHub release
-// unless it is a prerelease, and shows it as
-// latest unless it is a prerelease; past TAG_RELEASES_WAIT_SECONDS (default
-// 600) it stops with nothing tagged and names what npm still lacks. It then
-// refuses to finish unless each of those versions is tagged and released
-// (a prerelease only tagged).
+// sees nothing new and reports clean (#111). It first waits for each
+// checked-out version still missing its tag on origin or its GitHub release:
+// npm must list it and, unless it is a prerelease, show it as latest. Past
+// TAG_RELEASES_WAIT_SECONDS (default 600) it stops with nothing tagged and
+// names what npm still lacks. It then refuses to finish unless each of those
+// versions is tagged and released (a prerelease is only tagged).
 //
 // Usage: node scripts/tag-releases.mjs [--dry-run] [--after-publish]
 import { execFileSync } from 'node:child_process';
