@@ -377,9 +377,15 @@ export class VerifyService {
     // let any code through while the recipient index still points at it.
     if (record.status !== 'pending') {
       await this.dropIndexEntry(phone, sid, 'a finished verification');
+      this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
+    // This process's clock set expiresAt, so it judges the deadline here; a
+    // database store's reservation judges it again by the database clock, and
+    // the stricter of the two wins. Leaving it to the database alone would let
+    // a code live past its TTL whenever the database clock runs behind.
     if (record.expiresAt.getTime() <= Date.now()) throw await this.expire(phone, sid, record.channel, params.ip, checkStart);
 
     // The attempt is counted before the code is compared. A reservation is
@@ -468,7 +474,25 @@ export class VerifyService {
     this.vlog(`check: wrong code sid=${sid} attemptsRemaining=${attemptsRemaining}`);
     this.metrics.checksTotal(CHECK_OUTCOME.WrongCode);
     this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+    // Another check holding a reservation may have approved or cancelled the
+    // record while this one compared; answering pending would tell the client
+    // to keep guessing at a record that can no longer approve (#105). This
+    // read narrows that window without closing it: a finish landing just
+    // after it still leaves this answer pending. No extra guess follows
+    // either way, since every guess needs a reservation.
+    if (await this.finishedMeanwhile(sid)) return { sid, state: 'canceled', attemptsRemaining: 0 };
     return { sid, state: 'pending', attemptsRemaining };
+  }
+
+  // The attempt is already counted, so a failed read answers pending, as
+  // before this read existed, rather than failing the check.
+  private async finishedMeanwhile(sid: string): Promise<boolean> {
+    // Deferred so a store that throws synchronously is caught too.
+    const [current, err] = await asyncHandler(
+      Promise.resolve().then(() => this.options.stores.verify.get(sid)),
+    );
+    if (err) this.log.warn(`check: re-read of sid=${sid} did not complete: ${err.message}`);
+    return !err && current?.status !== 'pending';
   }
 
   /**

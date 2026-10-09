@@ -107,6 +107,27 @@ async function exerciseVerifyStore(name, verify) {
   await verify.create(v5);
   const rExp = await verify.reserveAttempt(v5.sid);
   assert(rExp.outcome === 'expired' && rExp.record.attempts === 0, `reserve on an expired record -> expired, attempts untouched, got ${rExp.outcome}/${rExp.record?.attempts}`);
+
+  // A refusal is named by the database clock that made it, whatever this
+  // process's clock says (#105). Fixtures are written before the skew.
+  const realNow = Date.now();
+  const v6 = recordFixture(`vr_dbexpired_${RUN}`, { attempts: 0, maxAttempts: 3, expiresAt: new Date(realNow - 1_000) });
+  const v7 = recordFixture(`vr_dbspent_${RUN}`, { attempts: 3, maxAttempts: 3, expiresAt: new Date(realNow + 60_000) });
+  await verify.create(v6);
+  await verify.create(v7);
+  const skew = (ms) => { Date.now = () => realNow + ms; };
+  const realDateNow = Date.now;
+  try {
+    skew(-3_600_000);
+    const behind = (await verify.reserveAttempt(v6.sid)).outcome;
+    skew(3_600_000);
+    const ahead = (await verify.reserveAttempt(v7.sid)).outcome;
+    Date.now = realDateNow;
+    assert(behind === 'expired', `expired by the database clock while the app clock is an hour behind -> expired, got ${behind}`);
+    assert(ahead === 'exhausted', `spent but unexpired while the app clock is an hour ahead -> exhausted, got ${ahead}`);
+  } finally {
+    Date.now = realDateNow;
+  }
 }
 
 async function exerciseAbuseStore(name, abuse) {
@@ -231,7 +252,8 @@ async function exerciseEmailFlow(name, stores) {
 
   const locked = `lock.${tag}@example.com`;
   await service.start({ to: locked, channel: 'email' });
-  await service.check({ to: locked, code: '000000' });
+  const first = await service.check({ to: locked, code: '000000' });
+  assert(first.state === 'pending' && first.attemptsRemaining === 1, `a wrong code with an attempt left answers pending, 1 left, got ${first.state}/${first.attemptsRemaining}`);
   assert((await service.check({ to: locked, code: '000000' })).state === 'canceled', 'wrong codes lock out');
   const again = await service.start({ to: locked, channel: 'email' }).catch((e) => e);
   assert(again?.code === 'COOLDOWN_ACTIVE', 'cooldown applies to the address');
@@ -247,8 +269,9 @@ async function exerciseEmailFlow(name, stores) {
   assert(sent.length - before === 1, 'one code sent');
 
   // A burst of simultaneous wrong checks spends exactly attempts.max (2)
-  // attempts: one answers pending with one left, the one that spends the last
-  // locks the record, and the rest are refused without a comparison.
+  // attempts: the one that spends the last locks the record and the rest are
+  // refused without a comparison. The one with an attempt left answers pending
+  // only if it answers before the lockout lands, so at most one does (#105).
   const burst = `burst.${tag}.${RUN}@example.com`;
   const { sid: burstSid } = await service.start({ to: burst, channel: 'email' });
   const answers = await Promise.all(
@@ -256,7 +279,34 @@ async function exerciseEmailFlow(name, stores) {
   );
   const burstRecord = await stores.verify.get(burstSid);
   assert(burstRecord.attempts === 2 && burstRecord.status === 'canceled', `a burst spends exactly 2 attempts, got ${burstRecord.attempts}/${burstRecord.status}`);
-  assert(answers.filter((a) => a === 'pending').length === 1, `one wrong guess answers pending, got ${answers.join(',')}`);
+  assert(answers.filter((a) => a === 'pending').length <= 1, `at most one wrong guess answers pending, got ${answers.join(',')}`);
+  assert(answers.every((a) => a === 'pending' || a === 'canceled'), `every other guess answers canceled, got ${answers.join(',')}`);
+}
+
+// This process's clock set the deadline, so the service holds it even while
+// the database still finds the code valid: the stricter clock wins (#105).
+// Mongo is not run here: its phone index judges expiry by this process's
+// clock, so the lookup would fail before the check reached the deadline.
+async function exerciseServerClockExpiry(name, stores) {
+  console.log(`\n--- ${name} check holds the deadline the server set ---`);
+  const service = new VerifyService({
+    email: { provider: new MockEmailProvider({ logToConsole: false }) },
+    stores,
+    code: { fixedCode: '424242', ttlSeconds: 60 },
+    attempts: { max: 3, cooldownSeconds: 0 },
+  });
+  const to = `clock.${name.toLowerCase()}.${RUN}@example.com`;
+  await service.start({ to, channel: 'email' });
+  const realDateNow = Date.now;
+  const realNow = realDateNow();
+  let answer;
+  try {
+    Date.now = () => realNow + 120_000;
+    answer = await service.check({ to, code: '000000' }).then((r) => r.state, (e) => e?.code ?? e?.message);
+  } finally {
+    Date.now = realDateNow;
+  }
+  assert(answer === 'CODE_EXPIRED', `a code past its deadline by the server clock, valid by the database clock -> CODE_EXPIRED, got ${answer}`);
 }
 
 // A second start must wait while another instance holds the migration lock.
@@ -296,6 +346,7 @@ async function smokePostgres() {
   await exercisePhoneIndexStore('Postgres', pg.phoneIndex);
   await exerciseAuditSink('Postgres', pg.audit);
   await exerciseEmailFlow('Postgres', pg);
+  await exerciseServerClockExpiry('Postgres', pg);
   await pg.pool.end();
 }
 

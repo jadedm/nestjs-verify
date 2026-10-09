@@ -44,10 +44,13 @@ type ReserveOutcome = {
 };
 
 // Why a reservation that matched nothing was refused. The decision was made
-// atomically by the update; this only names it from a later read.
-const refusedOutcome = (r: VerificationRecord): ReserveOutcome['outcome'] => {
+// atomically by the update; this only names it from a later read, on the
+// same database clock rather than this process's, which may disagree with
+// it (#105). The read is a moment later than the update, so a record spent
+// just before its deadline can be named expired; that fails closed.
+const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveOutcome['outcome'] => {
   if (r.status !== 'pending') return 'not-pending';
-  if (r.expiresAt.getTime() <= Date.now()) return 'expired';
+  if (expired) return 'expired';
   return 'exhausted';
 };
 
@@ -109,10 +112,16 @@ export class MongoVerifyStore implements VerifyStore {
       { returnDocument: 'after', includeResultMetadata: true },
     );
     if (result.value) return { record: this.toRecord(result.value), outcome: 'reserved' };
-    const existing = await this.col.findOne({ _id: sid });
+    const [existing] = await this.col
+      .aggregate<VerificationDoc & { dbExpired: boolean }>([
+        { $match: { _id: sid } },
+        { $addFields: { dbExpired: { $lte: ['$expiresAt', '$$NOW'] } } },
+      ])
+      .toArray();
     if (!existing) return { record: null, outcome: 'not-found' };
-    const record = this.toRecord(existing);
-    return { record, outcome: refusedOutcome(record) };
+    const { dbExpired: expired, ...doc } = existing;
+    const record = this.toRecord(doc);
+    return { record, outcome: refusedOutcome(record, expired) };
   }
 
   /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */

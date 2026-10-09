@@ -139,6 +139,23 @@ describe('VerifyService, attempts counted before the code is compared', () => {
     vi.useRealTimers();
   });
 
+  it('refuses a code past the deadline this process set, even when the store would still reserve it (#105)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const service = build({ code: { fixedCode: CODE, ttlSeconds: 60 } });
+    await service.start({ to: PHONE });
+    const sid = (await stores.phoneIndex.get(PHONE))!;
+    // Database stores whose clock runs behind this process's would still find
+    // the index entry, read the record as pending and reserve.
+    const stored = (await stores.verify.get(sid))!;
+    vi.spyOn(stores.phoneIndex, 'get').mockResolvedValue(sid);
+    vi.spyOn(stores.verify, 'get').mockResolvedValue(stored);
+    const reserve = vi.spyOn(stores.verify, 'reserveAttempt').mockResolvedValue({ record: stored, outcome: 'reserved' });
+    vi.setSystemTime(Date.now() + 120_000);
+    expect(await outcome(service.check({ to: PHONE, code: CODE }))).toBe('CODE_EXPIRED');
+    expect(reserve).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it('records no lockout when a right code approved first and the last wrong code then fails to cancel (review)', async () => {
     const service = build();
     await service.start({ to: PHONE });
@@ -156,6 +173,45 @@ describe('VerifyService, attempts counted before the code is compared', () => {
     expect(await outcome(service.check({ to: PHONE, code: wrong(3) }))).toBe('canceled');
     expect(stores.audit.events.slice(events).filter((e) => e.type === 'verification_canceled')).toHaveLength(0);
     expect((await stores.verify.get(sid))!.status).toBe('approved');
+  });
+
+  it('answers canceled, not pending, when another check approves while a wrong code is compared (#105)', async () => {
+    const service = build();
+    await service.start({ to: PHONE });
+    const sid = (await stores.phoneIndex.get(PHONE))!;
+    // The wrong code holds a reservation with attempts left; a right code
+    // holding another reservation approves before the wrong code answers.
+    const reserve = stores.verify.reserveAttempt.bind(stores.verify);
+    vi.spyOn(stores.verify, 'reserveAttempt').mockImplementationOnce(async (id) => {
+      const r = await reserve(id);
+      await stores.verify.markStatus(id, 'approved');
+      return r;
+    });
+    const r = await service.check({ to: PHONE, code: wrong(1) });
+    expect(r).toEqual({ sid, state: 'canceled', attemptsRemaining: 0 });
+    expect((await stores.verify.get(sid))!.status).toBe('approved');
+  });
+
+  it('answers pending when the re-read after a counted wrong code fails (review)', async () => {
+    const service = build();
+    await service.start({ to: PHONE });
+    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const get = stores.verify.get.bind(stores.verify);
+    vi.spyOn(stores.verify, 'get')
+      .mockImplementationOnce(get)
+      .mockRejectedValueOnce(new Error('pool exhausted'));
+    expect(await service.check({ to: PHONE, code: wrong(1) })).toEqual({ sid, state: 'pending', attemptsRemaining: 2 });
+  });
+
+  it('counts a check of a finished record under no_pending (#15)', async () => {
+    const service = build();
+    await service.start({ to: PHONE });
+    const sid = (await stores.phoneIndex.get(PHONE))!;
+    await stores.verify.markStatus(sid, 'approved');
+    const metrics = (service as unknown as { metrics: { checksTotal: (o: string) => void } }).metrics;
+    const counted = vi.spyOn(metrics, 'checksTotal');
+    expect(await outcome(service.check({ to: PHONE, code: CODE }))).toBe('canceled');
+    expect(counted.mock.calls).toEqual([['no_pending']]);
   });
 
   it('refuses a verify store without reserveAttempt on boot', () => {
