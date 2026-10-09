@@ -252,7 +252,8 @@ async function exerciseEmailFlow(name, stores) {
 
   const locked = `lock.${tag}@example.com`;
   await service.start({ to: locked, channel: 'email' });
-  await service.check({ to: locked, code: '000000' });
+  const first = await service.check({ to: locked, code: '000000' });
+  assert(first.state === 'pending' && first.attemptsRemaining === 1, `a wrong code with an attempt left answers pending, 1 left, got ${first.state}/${first.attemptsRemaining}`);
   assert((await service.check({ to: locked, code: '000000' })).state === 'canceled', 'wrong codes lock out');
   const again = await service.start({ to: locked, channel: 'email' }).catch((e) => e);
   assert(again?.code === 'COOLDOWN_ACTIVE', 'cooldown applies to the address');
