@@ -20,12 +20,7 @@ You should expect an acknowledgement within 5 business days. If you do not hear 
 
 ## Supported versions
 
-This project is pre-1.0. Only the latest minor release is supported for security fixes.
-
-| Version | Supported |
-|---|---|
-| 0.2.x | yes |
-| 0.1.x | no, please upgrade to 0.2.x |
+This project is pre-1.0. Each package versions on its own, and only the latest minor release of each package receives security fixes; npm shows the current version (`npm view @jadedm/nestjs-verify version`). A fix ships as a new release of the affected packages, and the advisory names the first fixed versions.
 
 When a 1.0.0 release is cut, this policy will be revisited to add a longer support window for the most recent major version.
 
@@ -41,12 +36,12 @@ If a vulnerability is being actively exploited or the fix is high risk, the time
 
 In scope:
 
-* Bugs in the published `@jadedm/nestjs-verify`, `@jadedm/nestjs-verify-twilio`, `@jadedm/nestjs-verify-postgres`, and `@jadedm/nestjs-verify-mongo` packages.
+* Bugs in any published package of this repository: `@jadedm/nestjs-verify` and its adapters `-twilio`, `-gupshup`, `-ses`, `-postgres`, `-mongo` and `-redis`.
 * Documented behavior in the README that is materially insecure.
 
 Out of scope:
 
-* The maturity gaps already listed in the README (atomic rate limit accuracy under high concurrency, lack of OpenTelemetry, lack of tamper-evident audit log, and the other items in the "Maturity and limitations" section). These are not vulnerabilities. They are known limitations and live on the 1.0 roadmap.
+* The known gaps listed under "Maturity and limitations" in the core package README (for example the absence of a tamper-evident audit log or of multi-tenant isolation). These are not vulnerabilities; they are known limitations on the roadmap.
 * Issues in transitive dependencies that do not affect the library's behavior.
 * Issues caused by misconfiguration in the consuming application (for example, exposing the verify endpoint without authentication and being surprised by abuse).
 
