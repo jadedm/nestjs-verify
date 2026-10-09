@@ -106,7 +106,11 @@ You can use a single backend for all five, or split durable vs ephemeral (Postgr
 ## Peers
 
 - `@nestjs/common`, `@nestjs/core`: 9, 10, or 11
+- `@nestjs/swagger`: 7 to 11
+- `class-validator` 0.14, `class-transformer` 0.5
+- `@opentelemetry/api` 1.7 or newer (spans are emitted only when the app registers an OpenTelemetry SDK)
 - `reflect-metadata`, `rxjs`
+- `prom-client` 14 or 15, optional: only for `observability.metrics`
 
 No `@nestjs/cache-manager` peer dep. State is managed through the store interfaces.
 
@@ -142,54 +146,54 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 * Constant-time code comparison via `crypto.timingSafeEqual`.
 * Salted SHA-256 storage of codes at rest. The code is never persisted in clear.
 * Atomic attempt counters using `UPDATE ... RETURNING` (Postgres) and aggregation pipeline updates (Mongo). Lockout on max attempts happens in a single round trip.
-* Per-phone and per-IP rate limiting with fixed window semantics.
-* Per-phone cooldown after each send, claimed atomically before sending, so simultaneous starts for one phone send one code.
-* Distinct-phones-per-IP velocity check, configurable window.
-* Pluggable provider strategy with a fallback chain.
+* Per-recipient and per-IP rate limiting with fixed window semantics; each store's counter is a single atomic operation.
+* Per-recipient cooldown after each send, claimed atomically before sending, so simultaneous starts for one recipient send one code.
+* Distinct-recipients-per-IP velocity check, configurable window.
+* Pluggable provider strategy with a fallback chain, and per-attempt and total delivery time limits.
+* SMS and email codes. Voice and WhatsApp are refused with `CHANNEL_NOT_SUPPORTED`.
+* Input validation on the built-in controller with `class-validator` DTOs, and OpenAPI annotations.
+* Optional OpenTelemetry spans, Prometheus metrics (`prom-client`) and an audit sink (memory, logger, stdout, Postgres and Mongo).
 * TTL on verification records: native TTL index in Mongo, schema-managed expiry in Postgres.
-* Phone normalization to E.164.
+* Phone numbers must be in E.164 form (spaces are stripped; anything else is refused with `INVALID_PHONE`).
 * Phone-number redaction in this library's own log lines.
+* Store adapters tested against live Postgres, Mongo and Redis in CI, the Mongo stores under mongodb 5 and 6.
 
-### Known gaps before 1.0
+### Before 1.0
 
-These are tracked for the 1.0 milestone. They are not present in 0.x.
+The plan to 1.0 and the decisions still open are tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). Known gaps today:
 
-1. Atomic rate-limit counters. The current cache-manager implementation does a `get` followed by a `set` and can leak one or two extra requests through under concurrency. For high-throughput deployments, swap to `@nestjs/throttler` with a Redis adapter, or supply your own counter that uses `INCR`.
-2. DTO validation with `class-validator`. Input validation today is manual regex on the service. Decorator-based DTO validation is planned.
-3. OpenAPI annotations on the built-in controller.
-4. Integration tests against live Postgres and Mongo using testcontainers. Current test coverage exercises the in-memory store and the Twilio retry policy only.
-5. Delivery receipt handling. The library dispatches via the SMS provider but does not yet process delivery callbacks (Twilio DLR webhooks).
+1. Delivery receipts ([#86](https://github.com/jadedm/nestjs-verify/issues/86)). The library hands a code to the provider but does not process delivery callbacks (Twilio and Gupshup DLR webhooks, SES delivery events).
+2. Store and policy names still say "phone" where they hold an email address too ([#8](https://github.com/jadedm/nestjs-verify/issues/8)), and send metrics carry no channel label ([#7](https://github.com/jadedm/nestjs-verify/issues/7)). Renaming them is a breaking change, planned before 1.0.
+3. A phone-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent.
 
-### Not in scope for 1.0
+### Not decided for 1.0
 
-These may be added later or ship as separate modules. Plan deployments accordingly.
+Each of these is an open decision on [#89](https://github.com/jadedm/nestjs-verify/issues/89). Plan deployments as if they are absent.
 
-1. OpenTelemetry spans and Prometheus metrics. Likely to arrive as separate packages so consumers can opt in.
-2. Multi-tenant isolation. Rate-limit and cooldown state is keyed by phone alone today. Two tenants in one deployment share state for a phone number that exists in both. If you need per-tenant isolation, wrap the service in your own tenant-scoping layer or open an issue describing the shape you need.
-3. Tamper-evident audit log. The audit concern will ship as a separate module. Until then, you can subscribe to send attempts via the `AbuseStore` interface and persist whatever shape you need.
-4. Internationalized message templates. `messageTemplate` is a single string today.
-5. KMS-backed code hashing. SHA-256 with a random salt is the current primitive.
+1. Multi-tenant isolation. Rate-limit and cooldown state is keyed by recipient alone, so two tenants in one deployment share state for a phone number or address that exists in both. If you need per-tenant isolation, wrap the service in your own tenant-scoping layer or open an issue describing the shape you need.
+2. Tamper-evident audit log. The audit sink records events but does not chain or sign them.
+3. Internationalized message templates. `messageTemplate` is a single string today.
+4. KMS-backed code hashing. SHA-256 with a random salt is the current primitive.
 
 ### How to evaluate suitability for your project
 
 Use the library when:
 
 * Your verification volume is moderate (single-digit to low thousands of verifications per minute).
-* You can tolerate fixed-window rate limiting at low single-digit accuracy at peak concurrency.
+* Fixed-window rate limits are enough for you.
 * You do not yet need provider delivery receipt processing.
 * Compliance requirements do not yet require a tamper-evident audit log.
 
 Defer adoption when:
 
-* You require strict atomicity guarantees on rate limits at high concurrency.
 * You require SOC 2 or PCI evidence trails out of the box.
 * You require multi-tenant isolation of OTP state today.
 
-If you adopt it for a use case in the second list, expect to add the missing pieces yourself or wait for the matching milestone.
+If you adopt it for a use case in the second list, expect to add the missing pieces yourself or wait for the matching decision on #89.
 
-## Consulting
+## Help
 
-If you need integration help, a custom provider or store adapter, or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+If you need a custom provider or store adapter, or help integrating and shipping this into production, [Inoltro](https://inoltro.ai) is my studio.
 
 ## License
 

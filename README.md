@@ -2,6 +2,18 @@
 
 Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS or email provider and the stores.
 
+## Upgrading to 0.7.0
+
+0.7.0 is a breaking change for custom stores only. The shipped memory, Postgres, Mongo and Redis stores already implement the new methods.
+
+- `CooldownStore` gains `claim(key, seconds, holder)` and `release(key, holder)`. `start` claims the cooldown atomically before it sends, so simultaneous starts for one recipient send one code; the others get `COOLDOWN_ACTIVE`.
+- `PhoneIndexStore` gains `deleteIfMatches(phone, sid)`. Cleanup removes a recipient's index entry only while it still points at that verification, so it can no longer remove a newer one.
+- `VerifyService` refuses, when it is constructed, a store that lacks any of these methods.
+- Postgres: migration 3 adds a `holder` column to `verify_cooldowns`. `createPostgresStores` applies it on start; with `skipSchemaSetup`, apply it from the exported `MIGRATIONS` before upgrading.
+- A second `check` of an expired, locked-out or finished verification now answers `NO_PENDING_VERIFICATION` instead of `canceled`, as it already did after an approval.
+
+The changelogs in each package carry the details.
+
 ## Migrating from 0.2.x to 0.3.0
 
 0.3.0 is a breaking change. The library no longer depends on `@nestjs/cache-manager`. State is now organized behind five store interfaces, with one adapter per backend.
@@ -155,7 +167,7 @@ The trade-off is honest: you trade Twilio's compliance and managed surface for c
 
 ## Maturity
 
-Beta. The cryptographic primitives are sound and the store atomicity is correct. The library is missing several features expected of enterprise compliance environments. Read [the full maturity and limitations section](./packages/core/README.md#maturity-and-limitations) in the core package README before adopting.
+Beta. The cryptographic primitives are sound and the store atomicity is correct. The library is missing several features expected of enterprise compliance environments. Read [the full maturity and limitations section](./packages/core/README.md#maturity-and-limitations) in the core package README before adopting. The work towards 1.0, and the decisions still open, are tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89).
 
 ## Local development
 
@@ -163,17 +175,18 @@ Beta. The cryptographic primitives are sound and the store atomicity is correct.
 pnpm install
 pnpm build
 pnpm test                # unit tests across all packages
-pnpm test:adapters       # live integration smoke against Postgres + Mongo (needs Docker)
+pnpm test:adapters       # live adapter smoke against Postgres, Mongo and Redis (needs Docker)
+pnpm test:adapters:mongo-drivers   # the Mongo smoke under mongodb 5.0.0, 5.x and 6.x
 pnpm --filter basic-twilio-postgres start
 ```
 
 The runnable example in `examples/basic-twilio-postgres` wires the core, the Twilio provider, and the Postgres store together.
 
-`pnpm test:adapters` spins up Postgres 16 and Mongo 7 in Docker, runs the adapter contract script in `scripts/smoke-adapters.mjs`, and tears the containers down. It is the safest pre-release check for any change that touches a store adapter. See `scripts/README.md` for details.
+`pnpm test:adapters` spins up Postgres 16, Mongo 7 and Redis 7 in Docker, runs the adapter contract script in `scripts/smoke-adapters.mjs`, and tears the containers down. It is the safest pre-release check for any change that touches a store adapter. See `scripts/README.md` for details.
 
 ## Releases
 
-Each package versions independently via [Changesets](https://github.com/changesets/changesets). A `linked` group keeps core, Twilio, Postgres and SES on the same version when they release together; Gupshup, Mongo and Redis version on their own. The release workflow uses npm Trusted Publishing (OIDC); no NPM_TOKEN is needed in CI once trusted publishers are configured per package on npmjs.com.
+Each package versions independently via [Changesets](https://github.com/changesets/changesets). A `linked` group keeps core, Twilio, Postgres and SES on the same version when they release together; Gupshup, Mongo and Redis version on their own. The release workflow is built for npm Trusted Publishing (OIDC), which needs no NPM_TOKEN once trusted publishers are configured per package on npmjs.com.
 
 To propose a change:
 
@@ -181,12 +194,10 @@ To propose a change:
 pnpm changeset       # describe the change, pick affected packages and bump type
 git commit -am "..."
 git push
-# A "Version Packages" PR opens automatically; merging it publishes.
+# A "Version Packages" PR opens automatically.
 ```
 
-## Consulting
-
-If you need integration help, custom provider or store adapters, NestJS architecture review, or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+For now the packages are published by hand after that PR merges, with `scripts/publish-manual.sh`; CI publishing waits on trusted publishers being set up on npmjs.com ([#19](https://github.com/jadedm/nestjs-verify/issues/19)).
 
 ## License
 
@@ -194,6 +205,6 @@ MIT. Manish Jadhav ([@jadedm](https://github.com/jadedm)).
 
 ---
 
-**Built by [Manish Jadhav](https://manishj.com)**, engineer & technical consultant.
+Built by [Manish Jadhav](https://manishj.com).
 
 Need something like this designed or built? [Inoltro](https://inoltro.ai) is my studio.

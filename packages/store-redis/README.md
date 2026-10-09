@@ -52,9 +52,9 @@ Any object that implements `get`, `set` (variadic), `del`, `pttl`, and `eval` ma
 - `@jadedm/nestjs-verify` within the range in `peerDependencies`
 - `ioredis` 5.x (optional peer; required only if you pass an `ioredis` instance directly)
 
-## Consulting
+## Help
 
-If you need a custom adapter, integration help, or fractional CTO support shipping this into production, see [manishj.com](https://manishj.com).
+If you need a custom adapter, or help integrating and shipping this into production, [Inoltro](https://inoltro.ai) is my studio.
 
 ## License
 
