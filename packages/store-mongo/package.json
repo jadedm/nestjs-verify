@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify-mongo",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "MongoDB store adapter for @jadedm/nestjs-verify (verifications + abuse log).",
   "keywords": [
     "nestjs",
