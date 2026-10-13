@@ -11,9 +11,9 @@
  *                      peer range admits instead of the workspace's core (#76)
  *
  * `lowest` is the oldest major line, not the exact floor version: the floors
- * of several peers cannot be installed together (Nest 9.0.0 itself needs
- * rxjs ^7.1.0 while the core allows ^7.0.0), and a user on an old major runs
- * its latest release.
+ * of several peers cannot be installed together (an old major's first
+ * release can need a newer version of another peer than the core's range
+ * floor), and a user on an old major runs its latest release.
  *
  * Per package:
  * - every bare import or require in the built files names a declared peer,

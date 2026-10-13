@@ -35,7 +35,7 @@ The AWS SDK retries throttling and server errors itself (three attempts by defau
 
 ## Requirements
 
-Node 20 or newer: current `@aws-sdk/client-sesv2` releases require it, though the core package still supports Node 18.
+Node 22.12 or newer, as for the core package.
 
 ## Peers
 

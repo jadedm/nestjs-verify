@@ -28,14 +28,14 @@ const isExact = (v) => /^\d+\.\d+\.\d+$/.test(v);
 const satisfies = (wanted, installed) =>
   isExact(wanted) ? installed === wanted : installed.split('.')[0] === wanted;
 
-// Core's required peers, at versions known to install together on Node 18+.
+// Core's required peers, at the newest supported line (Nest 12, #123).
 const PEERS = [
-  '@nestjs/common@^10',
-  '@nestjs/core@^10',
-  '@nestjs/swagger@^8',
+  '@nestjs/common@^12',
+  '@nestjs/core@^12',
+  '@nestjs/swagger@^12',
   '@opentelemetry/api@^1.9.0',
   'class-transformer@^0.5.1',
-  'class-validator@^0.14.1',
+  'class-validator@^0.15.1',
   'reflect-metadata@^0.2.0',
   'rxjs@^7',
 ];

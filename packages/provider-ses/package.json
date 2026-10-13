@@ -46,7 +46,7 @@
     "@aws-sdk/client-sesv2": "^3.500.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "build": "tsup",

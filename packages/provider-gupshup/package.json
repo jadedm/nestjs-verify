@@ -49,5 +49,8 @@
   },
   "devDependencies": {
     "@jadedm/nestjs-verify": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

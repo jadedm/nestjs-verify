@@ -56,5 +56,8 @@
   "devDependencies": {
     "@jadedm/nestjs-verify": "workspace:*",
     "ioredis": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

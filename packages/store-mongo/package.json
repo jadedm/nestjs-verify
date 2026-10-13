@@ -49,5 +49,8 @@
   "devDependencies": {
     "@jadedm/nestjs-verify": "workspace:*",
     "mongodb": "^6.5.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }
