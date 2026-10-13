@@ -26,7 +26,8 @@
 // versions is tagged and released (a prerelease is only tagged). A version
 // that npm's stable `latest` has already passed is not waited for as latest:
 // it is waited for until listed, then tagged without a release (#113). A
-// later run from a checkout at that version skips it again the same way.
+// later run from a checkout at that version skips it again the same way while
+// `latest` stays higher.
 //
 // Usage: node scripts/tag-releases.mjs [--dry-run] [--after-publish]
 import { execFileSync } from 'node:child_process';
