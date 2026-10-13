@@ -22,6 +22,11 @@ You should expect an acknowledgement within 5 business days. If you do not hear 
 
 The latest 1.x minor of each package receives security fixes, as a patch or minor release; npm shows the current version (`npm view @jadedm/nestjs-verify version`). The advisory names the first fixed versions. 0.x versions receive no fixes; upgrade to 1.x.
 
+## Published advisories
+
+* [GHSA-2hm7-qvj9-f6xh](https://github.com/jadedm/nestjs-verify/security/advisories/GHSA-2hm7-qvj9-f6xh): `maxAttempts` was not enforced for simultaneous `check` requests. Affects `@jadedm/nestjs-verify` before 0.8.0; fixed in 0.8.0.
+* [GHSA-qm9j-mc5v-33p5](https://github.com/jadedm/nestjs-verify/security/advisories/GHSA-qm9j-mc5v-33p5): `check()` reported `approved` for a verification that was no longer pending, without comparing the code. Affects `@jadedm/nestjs-verify` 0.5.0 and earlier; fixed in 0.6.0.
+
 ## Disclosure timeline
 
 * Day 0: report received and acknowledged.
