@@ -88,3 +88,13 @@ The table lists the `VerifyStore` and `AbuseStore` invariants (`incrementAttempt
 | A3 | `countDistinctPhonesByIp` returns the correct distinct count |
 
 All invariants must pass for the script to exit 0. Any failure exits 1 with a descriptive line.
+
+## deprecate-broken-versions.mjs
+
+Deprecates every published version whose peer dependency on core was published as an unresolved `workspace:` range, which npm cannot install (#114: the adapter versions before 0.6.0). It finds them by that rule on npm, prints them, and changes nothing without `--apply`. With `--apply` it runs `npm deprecate` once per version, so the owner runs it from their own terminal after `npm login` (2FA; `--otp <code>` is passed through), and stops at the first failure naming what is done and what is left. Only when every call succeeds does it read each version back. A rerun skips what is already deprecated; one `--otp` code can expire partway through 19 calls, so the browser approval is the easier path.
+
+```bash
+node scripts/deprecate-broken-versions.mjs           # preview
+node scripts/deprecate-broken-versions.mjs --apply   # owner, own terminal
+scripts/test-deprecate-broken-versions.sh            # checks it against a stub npm
+```
