@@ -34,7 +34,8 @@ export class PostgresAbuseStore implements AbuseStore {
        VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, NOW()))`,
       [
         s.sid,
-        s.phone,
+        // A core before 0.9.0 sets only `phone` (#8); the column keeps its name.
+        s.recipient ?? s.phone,
         s.ip ?? null,
         s.channel,
         s.provider,
@@ -55,20 +56,20 @@ export class PostgresAbuseStore implements AbuseStore {
     return Number(rows[0]?.count ?? 0);
   }
 
-  async countAttemptsByPhone(
-    phone: string,
+  async countAttemptsByRecipient(
+    recipient: string,
     windowMs: number,
   ): Promise<number> {
     const { rows } = await this.pool.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count
        FROM ${this.table}
        WHERE phone = $1 AND ts > NOW() - ($2::bigint || ' milliseconds')::interval`,
-      [phone, String(windowMs)],
+      [recipient, String(windowMs)],
     );
     return Number(rows[0]?.count ?? 0);
   }
 
-  async countDistinctPhonesByIp(
+  async countDistinctRecipientsByIp(
     ip: string,
     windowMs: number,
   ): Promise<number> {
@@ -79,5 +80,15 @@ export class PostgresAbuseStore implements AbuseStore {
       [ip, String(windowMs)],
     );
     return Number(rows[0]?.count ?? 0);
+  }
+
+  /** @deprecated Renamed to `countAttemptsByRecipient` in 0.9.0 (#8); removed in 1.0. */
+  async countAttemptsByPhone(phone: string, windowMs: number): Promise<number> {
+    return this.countAttemptsByRecipient(phone, windowMs);
+  }
+
+  /** @deprecated Renamed to `countDistinctRecipientsByIp` in 0.9.0 (#8); removed in 1.0. */
+  async countDistinctPhonesByIp(ip: string, windowMs: number): Promise<number> {
+    return this.countDistinctRecipientsByIp(ip, windowMs);
   }
 }

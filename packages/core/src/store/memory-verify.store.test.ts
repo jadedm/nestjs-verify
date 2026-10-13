@@ -6,7 +6,7 @@ function fixture(overrides: Partial<VerificationRecord> = {}): VerificationRecor
   const now = new Date();
   return {
     sid: 'vr_test_1',
-    phone: '+14155552671',
+    recipient: '+14155552671',
     channel: 'sms',
     codeHash: 'deadbeef',
     salt: 'salt',
@@ -85,7 +85,7 @@ describe('MemoryVerifyStore', () => {
 
 describe('MemoryVerifyStore.reserveAttempt', () => {
   const record = (over: Partial<VerificationRecord> = {}): VerificationRecord => ({
-    sid: 'vr_r', phone: '+1', channel: 'sms', codeHash: 'h', salt: 's', attempts: 0, maxAttempts: 3,
+    sid: 'vr_r', recipient: '+1', channel: 'sms', codeHash: 'h', salt: 's', attempts: 0, maxAttempts: 3,
     status: 'pending', createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000), ...over,
   });
 

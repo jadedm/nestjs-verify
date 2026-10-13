@@ -11,7 +11,9 @@ export interface MongoAbuseStoreOptions {
   retentionSeconds?: number;
 }
 
-interface SendAttemptDoc extends Omit<SendAttempt, 'ts'> {
+// The recipient is stored as `phone`, the field name since 0.1 (#8).
+interface SendAttemptDoc extends Omit<SendAttempt, 'ts' | 'recipient' | 'phone'> {
+  phone: string;
   ts: Date;
 }
 
@@ -52,7 +54,9 @@ export class MongoAbuseStore implements AbuseStore {
   }
 
   async recordSendAttempt(s: SendAttempt): Promise<void> {
-    await this.col.insertOne({ ...s, ts: s.ts ?? new Date() });
+    // A core before 0.9.0 sets only `phone` (#8); the document keeps that field.
+    const { recipient, phone, ...rest } = s;
+    await this.col.insertOne({ ...rest, phone: (recipient ?? phone)!, ts: s.ts ?? new Date() });
   }
 
   async countAttemptsByIp(ip: string, windowMs: number): Promise<number> {
@@ -60,15 +64,15 @@ export class MongoAbuseStore implements AbuseStore {
     return this.col.countDocuments({ ip, ts: { $gt: cutoff } });
   }
 
-  async countAttemptsByPhone(
-    phone: string,
+  async countAttemptsByRecipient(
+    recipient: string,
     windowMs: number,
   ): Promise<number> {
     const cutoff = new Date(Date.now() - windowMs);
-    return this.col.countDocuments({ phone, ts: { $gt: cutoff } });
+    return this.col.countDocuments({ phone: recipient, ts: { $gt: cutoff } });
   }
 
-  async countDistinctPhonesByIp(
+  async countDistinctRecipientsByIp(
     ip: string,
     windowMs: number,
   ): Promise<number> {
@@ -78,6 +82,16 @@ export class MongoAbuseStore implements AbuseStore {
       ts: { $gt: cutoff },
     });
     return phones.length;
+  }
+
+  /** @deprecated Renamed to `countAttemptsByRecipient` in 0.9.0 (#8); removed in 1.0. */
+  async countAttemptsByPhone(phone: string, windowMs: number): Promise<number> {
+    return this.countAttemptsByRecipient(phone, windowMs);
+  }
+
+  /** @deprecated Renamed to `countDistinctRecipientsByIp` in 0.9.0 (#8); removed in 1.0. */
+  async countDistinctPhonesByIp(ip: string, windowMs: number): Promise<number> {
+    return this.countDistinctRecipientsByIp(ip, windowMs);
   }
 
   async close(): Promise<void> {

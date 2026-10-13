@@ -86,8 +86,9 @@ export class MongoVerifyStore implements VerifyStore {
   }
 
   async create(v: VerificationRecord): Promise<void> {
-    const { sid, ...rest } = v;
-    await this.col.insertOne({ _id: sid, ...rest });
+    // A core before 0.9.0 sets only `phone` (#8); the document keeps that field.
+    const { sid, recipient, phone, ...rest } = v;
+    await this.col.insertOne({ _id: sid, ...rest, phone: (recipient ?? phone)! });
   }
 
   async get(sid: string): Promise<VerificationRecord | null> {
@@ -187,6 +188,7 @@ export class MongoVerifyStore implements VerifyStore {
 
   private toRecord(doc: VerificationDoc): VerificationRecord {
     const { _id, ...rest } = doc;
-    return { sid: _id, ...rest };
+    // Both names: `recipient` for core 0.9.0 and later, `phone` for earlier (#8).
+    return { sid: _id, ...rest, recipient: doc.phone };
   }
 }

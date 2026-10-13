@@ -13,7 +13,7 @@ import Redis from 'ioredis';
 import { createRedisStores } from '@jadedm/nestjs-verify-redis';
 
 const redis = new Redis(process.env.REDIS_URL!);
-const { rateLimit, cooldown, phoneIndex } = createRedisStores({ client: redis });
+const { rateLimit, cooldown, recipientIndex } = createRedisStores({ client: redis });
 
 VerifyModule.forRoot({
   sms: { provider: ... },
@@ -22,7 +22,7 @@ VerifyModule.forRoot({
     abuse:      pgAbuse,     // durable, optional
     rateLimit,
     cooldown,
-    phoneIndex,
+    recipientIndex,
   },
 });
 ```

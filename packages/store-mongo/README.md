@@ -1,6 +1,6 @@
 # @jadedm/nestjs-verify-mongo
 
-MongoDB store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/package/@jadedm/nestjs-verify). Provides all five stores (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `PhoneIndexStore`) and an audit sink, plus the schema migrations.
+MongoDB store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/package/@jadedm/nestjs-verify). Provides all five stores (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `RecipientIndexStore`) and an audit sink, plus the schema migrations.
 
 ```bash
 pnpm add @jadedm/nestjs-verify-mongo mongodb
@@ -30,7 +30,7 @@ VerifyModule.forRootAsync({
 
 When the factory opens its own client from `uri`, it returns `close()`; call it on shutdown. If you already have a MongoClient or a Mongoose connection, pass the `Db` instead (`createMongoStores({ db: existingDb })`); the client then stays yours to close. Migrations run under a lock document, so several instances starting at once take turns. With `skipSchemaSetup: true` the factory only checks the schema version.
 
-The stores can also be built one at a time (see Construction options), for example to put the short-lived ones in Redis. The core requires `verify`, `rateLimit`, `cooldown` and `phoneIndex`; `abuse` (the velocity check) and `audit` are optional.
+The stores can also be built one at a time (see Construction options), for example to put the short-lived ones in Redis. The core requires `verify`, `rateLimit`, `cooldown` and `recipientIndex`; `abuse` (the velocity check) and `audit` are optional.
 
 Mongoose users: `mongooseConnection.db` returns the underlying `Db`.
 

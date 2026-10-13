@@ -83,7 +83,7 @@ describe('VerifyService, delivery limits', () => {
     const only = provider('stuck', never);
     const service = build({ provider: only.p }, { attemptTimeoutMs: 30 });
     expect(await errorCode(service.start({ to: PHONE }))).toBe(VerifyErrorCode.SmsDispatchFailed);
-    expect(await stores.phoneIndex.get(PHONE)).toBeNull();
+    expect(await stores.recipientIndex.get(PHONE)).toBeNull();
   });
 
   it('keeps a primary that answers just inside the limit (case 3)', async () => {
@@ -338,7 +338,7 @@ describe('VerifyService, delivery limits', () => {
       const err = await failure(service.start({ to: PHONE }));
       expect(err.code).toBe(VerifyErrorCode.SmsDispatchFailed);
       expect(err.extras.retryAfterMs).toBe(30_000);
-      expect(await stores.phoneIndex.get(PHONE)).toBeNull();
+      expect(await stores.recipientIndex.get(PHONE)).toBeNull();
     });
 
     it('answers 503 with retryAfterMs when the failure record cannot be written (round 2, finding 2)', async () => {
@@ -529,7 +529,7 @@ describe('VerifyService, delivery limits', () => {
       const removed = vi.spyOn(stores.verify, 'delete');
       await failure(service.start({ to: PHONE }));
       expect(removed).toHaveBeenCalledTimes(1);
-      expect(await stores.phoneIndex.get(PHONE)).toBeNull();
+      expect(await stores.recipientIndex.get(PHONE)).toBeNull();
       expect(recorded).toHaveBeenCalledWith(expect.objectContaining({ success: false, provider: 'stuck' }));
     });
   });

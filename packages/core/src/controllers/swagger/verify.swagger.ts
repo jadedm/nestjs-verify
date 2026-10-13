@@ -28,7 +28,7 @@ export const VerifySwagger = {
     cooldown: ApiResponse({
       status: 429,
       description:
-        'A code was sent to this phone recently. The retryAfterMs field tells the client how long to wait.',
+        'A code was sent to this recipient recently. The retryAfterMs field tells the client how long to wait.',
       schema: {
         type: 'object',
         properties: {
@@ -40,7 +40,7 @@ export const VerifySwagger = {
     }),
     rateLimited: ApiResponse({
       status: 429,
-      description: 'Per-phone or per-IP rate limit exceeded.',
+      description: 'Per-recipient (RECIPIENT_RATE_LIMITED) or per-IP (IP_RATE_LIMITED) rate limit exceeded.',
     }),
     invalid: ApiResponse({
       status: 400,

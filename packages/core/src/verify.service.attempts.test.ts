@@ -99,7 +99,7 @@ describe('VerifyService, attempts counted before the code is compared', () => {
   it('answers canceled without comparing or writing when every attempt is held by other checks', async () => {
     const service = build();
     await service.start({ to: PHONE });
-    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const sid = (await stores.recipientIndex.get(PHONE))!;
     for (let i = 0; i < 3; i++) await stores.verify.reserveAttempt(sid);
     const markStatus = vi.spyOn(stores.verify, 'markStatus');
     expect(await outcome(service.check({ to: PHONE, code: CODE }))).toBe('canceled');
@@ -143,11 +143,11 @@ describe('VerifyService, attempts counted before the code is compared', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const service = build({ code: { fixedCode: CODE, ttlSeconds: 60 } });
     await service.start({ to: PHONE });
-    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const sid = (await stores.recipientIndex.get(PHONE))!;
     // Database stores whose clock runs behind this process's would still find
     // the index entry, read the record as pending and reserve.
     const stored = (await stores.verify.get(sid))!;
-    vi.spyOn(stores.phoneIndex, 'get').mockResolvedValue(sid);
+    vi.spyOn(stores.recipientIndex, 'get').mockResolvedValue(sid);
     vi.spyOn(stores.verify, 'get').mockResolvedValue(stored);
     const reserve = vi.spyOn(stores.verify, 'reserveAttempt').mockResolvedValue({ record: stored, outcome: 'reserved' });
     vi.setSystemTime(Date.now() + 120_000);
@@ -161,7 +161,7 @@ describe('VerifyService, attempts counted before the code is compared', () => {
     await service.start({ to: PHONE });
     await service.check({ to: PHONE, code: wrong(1) });
     await service.check({ to: PHONE, code: wrong(2) });
-    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const sid = (await stores.recipientIndex.get(PHONE))!;
     // A right code holding the other reservation approves just before this
     // wrong code's lockout write, which then finds the record no longer pending.
     const markStatus = stores.verify.markStatus.bind(stores.verify);
@@ -178,7 +178,7 @@ describe('VerifyService, attempts counted before the code is compared', () => {
   it('answers canceled, not pending, when another check approves while a wrong code is compared (#105)', async () => {
     const service = build();
     await service.start({ to: PHONE });
-    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const sid = (await stores.recipientIndex.get(PHONE))!;
     // The wrong code holds a reservation with attempts left; a right code
     // holding another reservation approves before the wrong code answers.
     const reserve = stores.verify.reserveAttempt.bind(stores.verify);
@@ -195,7 +195,7 @@ describe('VerifyService, attempts counted before the code is compared', () => {
   it('answers pending when the re-read after a counted wrong code fails (review)', async () => {
     const service = build();
     await service.start({ to: PHONE });
-    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const sid = (await stores.recipientIndex.get(PHONE))!;
     const get = stores.verify.get.bind(stores.verify);
     vi.spyOn(stores.verify, 'get')
       .mockImplementationOnce(get)
@@ -206,7 +206,7 @@ describe('VerifyService, attempts counted before the code is compared', () => {
   it('counts a check of a finished record under no_pending (#15)', async () => {
     const service = build();
     await service.start({ to: PHONE });
-    const sid = (await stores.phoneIndex.get(PHONE))!;
+    const sid = (await stores.recipientIndex.get(PHONE))!;
     await stores.verify.markStatus(sid, 'approved');
     const metrics = (service as unknown as { metrics: { checksTotal: (o: string) => void } }).metrics;
     const counted = vi.spyOn(metrics, 'checksTotal');

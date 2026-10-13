@@ -2,7 +2,7 @@ export * from './postgres-verify.store.js';
 export * from './postgres-abuse.store.js';
 export * from './postgres-rate-limit.store.js';
 export * from './postgres-cooldown.store.js';
-export * from './postgres-phone-index.store.js';
+export * from './postgres-recipient-index.store.js';
 export * from './postgres-audit.sink.js';
 export * from './create-postgres-stores.js';
 export * from './migration-runner.js';

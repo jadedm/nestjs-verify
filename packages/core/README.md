@@ -74,13 +74,13 @@ VerifyModule.forRootAsync({
     sms: { provider: ..., fallbacks: [...] },
     stores: {
       verify, abuse,        // durable
-      rateLimit, cooldown, phoneIndex,   // ephemeral
+      rateLimit, cooldown, recipientIndex,   // ephemeral
     },
     code:       { length: 6, ttlSeconds: 600, fixedCode: undefined },
     attempts:   { max: 5, cooldownSeconds: 30 },
     delivery:   { attemptTimeoutMs: 5000, totalTimeoutMs: 10000, fallbackAfterUncertain: true },
-    rateLimit:  { perPhone: { count: 5, windowSeconds: 3600 } },
-    abuse:      { maxDistinctPhonesPerIp: 10, velocityWindowSeconds: 300 },
+    rateLimit:  { perRecipient: { count: 5, windowSeconds: 3600 } },
+    abuse:      { maxDistinctRecipientsPerIp: 10, velocityWindowSeconds: 300 },
     messageTemplate: 'Your code is {{code}}',
     logging:    { verbose: false },
   }),
@@ -96,10 +96,10 @@ The architectural shape of 0.3.0 onward. Every piece of state lives behind a sto
 | Store | What it holds | Backed by |
 |---|---|---|
 | `VerifyStore` | Pending and terminal verification records, the source of truth | Postgres, Mongo |
-| `AbuseStore` | Send-attempt history for IP/phone velocity heuristics. Optional. | Postgres, Mongo |
-| `RateLimitStore` | Fixed-window counter per phone and per IP. Atomic. | Postgres, Mongo, Redis |
-| `CooldownStore` | Per-phone cooldown between sends. `claim` must decide the holder atomically, so of simultaneous starts for one phone only one sends; `release` ends a claim only for its holder. | Postgres, Mongo, Redis |
-| `PhoneIndexStore` | Phone -> sid lookup so check() does not need the sid. `deleteIfMatches` removes an entry only while it holds the given sid. | Postgres, Mongo, Redis |
+| `AbuseStore` | Send-attempt history for the IP velocity heuristic. Optional. | Postgres, Mongo |
+| `RateLimitStore` | Fixed-window counter per recipient and per IP. Atomic. | Postgres, Mongo, Redis |
+| `CooldownStore` | Per-recipient cooldown between sends. `claim` must decide the holder atomically, so of simultaneous starts for one recipient only one sends; `release` ends a claim only for its holder. | Postgres, Mongo, Redis |
+| `RecipientIndexStore` | Recipient -> sid lookup so check() does not need the sid. `deleteIfMatches` removes an entry only while it holds the given sid. Named `PhoneIndexStore` before 0.9.0. | Postgres, Mongo, Redis |
 
 You can use a single backend for all five, or split durable vs ephemeral (Postgres for `verify` and `abuse`, Redis for the other three) for speed.
 
@@ -162,8 +162,9 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 
 The plan to 1.0 is tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). 1.0 adds no new features: it is the fixes and breaking renames below, then a frozen public interface.
 
-1. Store and policy names still say "phone" where they hold an email address too ([#8](https://github.com/jadedm/nestjs-verify/issues/8)), and send metrics carry no channel label ([#7](https://github.com/jadedm/nestjs-verify/issues/7)). Renaming them is a breaking change, planned for 0.8.0.
-2. A phone-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent. Planned for 0.8.0.
+1. Send metrics carry no channel label, and the span attribute, one metric and one audit outcome still say "phone" ([#7](https://github.com/jadedm/nestjs-verify/issues/7)). Planned for 0.9.0. Store and policy names were renamed in 0.9.0 ([#8](https://github.com/jadedm/nestjs-verify/issues/8)); the old names are removed in 1.0.
+2. A recipient-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent. Planned for 0.9.0.
+3. A code's deadline is set by the server's clock and judged by both the server's and the database's, so steady skew between them shortens the effective TTL ([#108](https://github.com/jadedm/nestjs-verify/issues/108)). Planned for 0.9.0.
 
 ### After 1.0
 

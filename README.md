@@ -2,6 +2,26 @@
 
 Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS or email provider and the stores.
 
+## Upgrading to 0.9.0
+
+0.9.0 renames everything that said phone but also holds an email address (#8). The old names keep working in 0.9 and log a deprecation warning at boot; 1.0 removes them.
+
+| Before 0.9.0 | From 0.9.0 |
+|---|---|
+| `stores.phoneIndex`, `PhoneIndexStore` | `stores.recipientIndex`, `RecipientIndexStore` |
+| `MemoryPhoneIndexStore`, `PostgresPhoneIndexStore`, `MongoPhoneIndexStore`, `RedisPhoneIndexStore` | `...RecipientIndexStore` |
+| `rateLimit.perPhone` | `rateLimit.perRecipient` |
+| `abuse.maxDistinctPhonesPerIp` | `abuse.maxDistinctRecipientsPerIp` |
+| `VerificationRecord.phone`, `SendAttempt.phone` | `recipient` |
+| `AbuseStore.countAttemptsByPhone`, `countDistinctPhonesByIp` | `countAttemptsByRecipient`, `countDistinctRecipientsByIp` |
+| `AuditEvent.phoneRedacted` | `recipientRedacted` |
+| error code `PHONE_RATE_LIMITED` | `RECIPIENT_RATE_LIMITED` |
+
+- The error code is the one change with no alias, because a response carries one code. A client that compares `code` with the string `'PHONE_RATE_LIMITED'` must change; one that compares with `VerifyErrorCode.PhoneRateLimited` keeps working, since that deprecated constant now holds the new code.
+- The `create*Stores` factories return the index store as `recipientIndex`, and also as `phoneIndex` for code that reads the old name. `phoneIndex` is not enumerable, so a spread such as `{ ...pgStores, recipientIndex: redisStores.recipientIndex }` uses the Redis index. On the factory object itself the two names always hold the same store, whichever one is set. A 0.8 setup that spreads and sets `phoneIndex` also still works, with a warning; that warning also fires when both names are written by hand with different stores, and `phoneIndex` is used.
+- A custom store written for 0.8 keeps running: core writes both field names and falls back to the old method names. Its TypeScript needs `recipient` on the records it returns.
+- Database tables and columns keep their names; no migration.
+
 ## Upgrading to 0.7.0
 
 0.7.0 is a breaking change for custom stores only. The shipped memory, Postgres, Mongo and Redis stores already implement the new methods.

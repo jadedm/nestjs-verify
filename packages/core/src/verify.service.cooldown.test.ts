@@ -95,7 +95,7 @@ describe('VerifyService, atomic cooldown claim (#13)', () => {
       .mockImplementationOnce(claim)
       .mockImplementationOnce(claim)
       .mockRejectedValueOnce(new Error('cooldown down'));
-    const indexDelete = vi.spyOn(stores.phoneIndex, 'delete');
+    const indexDelete = vi.spyOn(stores.recipientIndex, 'delete');
     expect(await outcome(service.start({ to: PHONE }))).toBe('cooldown down');
     expect(indexDelete).not.toHaveBeenCalled();
     expect(await stores.cooldown.remaining(PHONE)).toBe(0);
@@ -215,16 +215,16 @@ describe('VerifyService, atomic cooldown claim (#13)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const sms = provider();
     const service = build(sms, { attempts: { cooldownSeconds: 1 }, delivery: { attemptTimeoutMs: 1000, totalTimeoutMs: 1000 } });
-    const set = stores.phoneIndex.set.bind(stores.phoneIndex);
+    const set = stores.recipientIndex.set.bind(stores.recipientIndex);
     let open!: () => void;
     const gate = new Promise<void>((r) => (open = r));
-    vi.spyOn(stores.phoneIndex, 'set').mockImplementationOnce(async (phone, sid, ttl) => {
+    vi.spyOn(stores.recipientIndex, 'set').mockImplementationOnce(async (phone, sid, ttl) => {
       await gate;
       return set(phone, sid, ttl);
     });
 
     const first = outcome(service.start({ to: PHONE }));
-    await vi.waitFor(() => expect(stores.phoneIndex.set).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(stores.recipientIndex.set).toHaveBeenCalledTimes(1));
     vi.setSystemTime(Date.now() + 60_000);
     expect(await outcome(service.start({ to: PHONE }))).toBe('ok');
     open();
@@ -234,7 +234,7 @@ describe('VerifyService, atomic cooldown claim (#13)', () => {
 
   it('deletes the record and gives the claim back when the index write fails (case 20)', async () => {
     const service = build(provider());
-    vi.spyOn(stores.phoneIndex, 'set').mockRejectedValueOnce(new Error('index down'));
+    vi.spyOn(stores.recipientIndex, 'set').mockRejectedValueOnce(new Error('index down'));
     const deleted = vi.spyOn(stores.verify, 'delete');
     expect(await outcome(service.start({ to: PHONE }))).toBe('index down');
     expect(deleted).toHaveBeenCalledTimes(1);
