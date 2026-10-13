@@ -6,26 +6,32 @@
 //
 // Each adapter declares core as a peer, bounded to the core versions it works
 // with (`>=0.9.0 <2.0.0` since 1.0; before it, one 0.x minor at a time).
-// Changesets bumps a package at major when a release leaves its peer range,
-// and the linked group then carries core, twilio, postgres and ses there with
-// it.
+// When a release leaves an adapter's peer range, Changesets 3 bumps that
+// adapter at patch (or to the linked group's version) and `changeset version`
+// rewrites its range to start at the new core, a release that drops the old
+// core (#97); Changesets 2 bumped it at major instead (#10). The linked group carries core, twilio, postgres and
+// ses to one version. Either way the release has to be refused here.
 //
 // Two checks, both computed with the libraries @changesets/cli itself uses:
 // - the pending changesets in .changeset/ as they are, which catches a core
 //   release outside an adapter range, and a new core minor that an adapter's
 //   version on npm refuses while that adapter is not released with it;
-// - probe changesets that exist only in memory, which catch the config:
-//   without onlyUpdatePeerDependentsWhenOutOfRange, every core minor bumps
-//   every adapter at major even inside its range.
+// - probe changesets that exist only in memory, which check that a core
+//   release inside the ranges releases core alone under this config.
+// It also requires onlyUpdatePeerDependentsWhenOutOfRange. Changesets 3's
+// planner no longer needs it, but `changeset version` still reads it: without
+// it, any core release, even a patch, rewrites every adapter's range floor to
+// that version, released or not, dropping the older cores (#97).
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fromCli = createRequire(createRequire(import.meta.url).resolve('@changesets/cli/package.json'));
 const assembleReleasePlan = fromCli('@changesets/assemble-release-plan').default;
-const { read: readConfig } = fromCli('@changesets/config');
+const { readConfig } = fromCli('@changesets/config');
 const readChangesets = fromCli('@changesets/read').default;
 const { readPreState } = fromCli('@changesets/pre');
 const { getPackages } = fromCli('@manypkg/get-packages');
@@ -36,11 +42,25 @@ const POSTGRES = '@jadedm/nestjs-verify-postgres';
 const MONGO = '@jadedm/nestjs-verify-mongo';
 
 const packages = await getPackages(root);
-const config = await readConfig(root, packages);
+// Changesets 3 reports some config mistakes as warnings and drops the bad
+// entry (a misspelt name in `linked` silently unlinks it), so both fail here.
+const { config, errors: configErrors = [], warnings: configWarnings = [] } = await readConfig(root, packages);
+// Unknown top-level keys are dropped without a warning (a misspelt "format"
+// falls back to running a formatter), so compare against what was read.
+const writtenConfig = JSON.parse(readFileSync(path.join(root, '.changeset', 'config.json'), 'utf8'));
+const unknownKeys = config ? Object.keys(writtenConfig).filter((k) => k !== '$schema' && !(k in config)) : [];
+const configProblems = [
+  ...[...configErrors, ...configWarnings].map((e) => e?.message ?? String(e)),
+  ...unknownKeys.map((k) => `unknown key "${k}"`),
+];
+if (configProblems.length > 0) {
+  console.error(`check-release-plan: .changeset/config.json:\n- ${configProblems.join('\n- ')}`);
+  process.exit(1);
+}
 const versionOf = (name) => packages.packages.find((p) => p.packageJson.name === name).packageJson.version;
 // Prerelease mode (.changeset/pre.json) is not supported: Changesets' peer
 // range check excludes prereleases, so every plan in it, even a plain core
-// patch, carries the adapters to a major. Refuse it with one clear message
+// patch, takes core outside the adapter ranges. Refuse it with one clear message
 // rather than a failure per probe.
 const readPre = await readPreState(root);
 if (readPre?.mode === 'pre') {
@@ -52,6 +72,13 @@ if (readPre?.mode === 'pre') {
 // will (it adds stable releases for packages that had prereleases); the
 // probes, which test the config rather than what is pending, plan without it.
 const preState = readPre;
+if (config.___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH?.onlyUpdatePeerDependentsWhenOutOfRange !== true) {
+  console.error(
+    'check-release-plan: .changeset/config.json must set ___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange to true; ' +
+      'without it `changeset version` rewrites every adapter core range to the new core version',
+  );
+  process.exit(1);
+}
 const linkedWith = (name) => config.linked.find((group) => group.includes(name)) ?? [name];
 const highest = (versions) => versions.reduce((a, b) => (semver.gt(b, a) ? b : a));
 
@@ -81,7 +108,8 @@ const outOfRange = (coreVersion) =>
 // the tightest range an adapter could carry. Nothing is written to disk.
 const widenedTo = (coreVersion) => {
   const upper = `${semver.major(coreVersion)}.${semver.minor(coreVersion) + 1}.0`;
-  const clone = structuredClone(packages);
+  // `tool` holds functions, which structuredClone refuses.
+  const clone = { ...packages, packages: structuredClone(packages.packages) };
   for (const p of clone.packages) {
     const declared = p.packageJson.peerDependencies?.[CORE];
     if (!declared) continue;
@@ -130,7 +158,7 @@ if (pendingTooHigh.length > 0) {
 // Core's linked group shares one version line: releasing twilio, postgres or
 // ses at a new minor without core puts core's next release on that minor too,
 // outside the adapter ranges, and Changesets would then rewrite those ranges
-// to an unbounded `>=`. So the version core takes now, or on its next patch,
+// in a patch. So the version core takes now, or on its next patch,
 // must stay inside every adapter's range.
 // When core is pending, its next patch after this release must fit too.
 const linkedPending = linkedWith(CORE).filter((n) => n !== CORE && pendingPlan[n]);
