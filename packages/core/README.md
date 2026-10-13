@@ -89,6 +89,23 @@ VerifyModule.forRootAsync({
 
 `delivery` bounds how long `POST /verify/start` waits on providers. An attempt that runs past `attemptTimeoutMs` counts as a failure and, by default, the next provider in `fallbacks` is tried; once `totalTimeoutMs` is spent, no further provider is tried and the request fails with 503 `SMS_DISPATCH_FAILED`. Each attempt's `send` gets an `AbortSignal` that fires at its limit. A request already in flight may still deliver: a fallback can then send a second message carrying the same code, and when every attempt times out, the 503 may follow a message that did arrive. Because of that, whenever a message may have gone out (an attempt timed out, a provider marked its error `mayHaveSent: true`, or the send succeeded and the bookkeeping after it failed), the 503 also starts the recipient's cooldown and, when that write succeeds, carries `retryAfterMs`, so an immediate retry gets 429 rather than starting another send. When every provider answered with an unmarked error, the core treats nothing as in flight: no cooldown starts and a retry is accepted at once. The cooldown stops the user's next retry, not a provider's own internal retries: Twilio and Gupshup retry a 500, 502, 504 or network failure inside one send, and such a retry can deliver the same code again; pass `retryAfterUncertain: false` to either provider to stop that. The core likewise tries the next provider in `fallbacks` after a possibly delivered attempt, which can also send the code twice; set `delivery.fallbackAfterUncertain: false` to stop the chain there instead (the request then answers 503, with `retryAfterMs` when the cooldown write succeeds). A start then sends at most once only when every provider in the chain marks its uncertain failures and does not retry after them: Twilio and Gupshup with `retryAfterUncertain: false` do; SES (the AWS SDK retries internally and does not mark errors), a Twilio or Gupshup provider left at its default, and custom providers that do not mark errors do not. The cost is fewer codes getting through when a provider is flaky. Limits above 2147483647 ms are refused, because Node's timers cannot represent them.
 
+## Metrics
+
+With `observability.metrics.enabled` and `prom-client` installed, the service records these (prefix `verify_` by default, set with `observability.metrics.prefix`). `channel` is `sms` or `email`; for `check` it is inferred from `to`.
+
+| Metric | Labels |
+|---|---|
+| `verify_starts_total` | `channel` |
+| `verify_starts_blocked_total` | `reason` (`cooldown`, `recipient_rate_limit`, `ip_rate_limit`, `abuse`), `channel` |
+| `verify_checks_total` | `outcome` (`approved`, `wrong_code`, `locked_out`, `expired`, `no_pending`), `channel` |
+| `verify_check_duration_seconds` | `channel` |
+| `verify_send_duration_seconds` | `channel`, `provider`, `outcome` (`success`, `failure`) |
+| `verify_recipient_rate_limit_hits_total` | `channel` |
+
+Until 1.0 two deprecated series count the same events under their pre-0.9.0 names: `verify_sms_send_duration_seconds` (SMS sends only, no `channel`) and `verify_phone_rate_limit_hits_total` (no `channel`). Do not add them to the new series. Several services may share one registry; they share its collectors.
+
+Spans carry `verify.recipient_redacted` (and, until 1.0, `verify.phone_redacted`), `verify.channel`, `verify.sid` and, on sends, `verify.provider`.
+
 ## The five stores
 
 The architectural shape of 0.3.0 onward. Every piece of state lives behind a store interface.
@@ -162,7 +179,7 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 
 The plan to 1.0 is tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). 1.0 adds no new features: it is the fixes and breaking renames below, then a frozen public interface.
 
-1. Send metrics carry no channel label, and the span attribute, one metric and one audit outcome still say "phone" ([#7](https://github.com/jadedm/nestjs-verify/issues/7)). Planned for 0.9.0. Store and policy names were renamed in 0.9.0 ([#8](https://github.com/jadedm/nestjs-verify/issues/8)); the old names are removed in 1.0.
+1. Store and policy names ([#8](https://github.com/jadedm/nestjs-verify/issues/8)) and metric and telemetry names ([#7](https://github.com/jadedm/nestjs-verify/issues/7)) were renamed from phone to recipient in 0.9.0, and metrics gained a `channel` label. The old names are removed in 1.0.
 2. A recipient-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent. Planned for 0.9.0.
 3. A code's deadline is set by the server's clock and judged by both the server's and the database's, so steady skew between them shortens the effective TTL ([#108](https://github.com/jadedm/nestjs-verify/issues/108)). Planned for 0.9.0.
 

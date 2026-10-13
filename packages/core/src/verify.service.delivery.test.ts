@@ -353,8 +353,8 @@ describe('VerifyService, delivery limits', () => {
     it('treats an error after a successful attempt as may-have-sent (round 2, finding 4)', async () => {
       const only = provider('ok', ok);
       const service = build({ provider: only.p });
-      const metrics = (service as unknown as { metrics: { smsSendDuration: () => void } }).metrics;
-      vi.spyOn(metrics, 'smsSendDuration').mockImplementation(() => {
+      const metrics = (service as unknown as { metrics: { sendDuration: () => void } }).metrics;
+      vi.spyOn(metrics, 'sendDuration').mockImplementation(() => {
         throw new Error('metrics broke');
       });
       const err = await failure(service.start({ to: PHONE }));

@@ -271,7 +271,7 @@ const loadKeys = (projectDir, name, kind) => {
 // as an app file bundled by esbuild is written).
 const metricsProbe = (kind) => {
   // 'registry' only when a started verification is really counted.
-  const body = `const r = createMetricsRecorder({ enabled: true }); const reg = r.getRegistry(); if (!reg) { console.log('noop'); } else { r.startsTotal(); reg.metrics().then((t) => console.log(/verify_starts_total 1\\b/.test(t) ? 'registry' : 'registry-not-counting')); }`;
+  const body = `const r = createMetricsRecorder({ enabled: true }); const reg = r.getRegistry(); if (!reg) { console.log('noop'); } else { r.startsTotal('sms'); reg.metrics().then((t) => console.log(/verify_starts_total\\{channel="sms"\\} 1\\b/.test(t) ? 'registry' : 'registry-not-counting')); }`;
   if (kind === 'module') return `import { createMetricsRecorder } from '${CORE}';\n${body}`;
   const get = kind === 'esm' ? `(await import('${CORE}'))` : `require('${CORE}')`;
   return `const { createMetricsRecorder } = ${get}; ${body}`;

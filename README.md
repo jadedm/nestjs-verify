@@ -16,7 +16,13 @@ Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a ver
 | `AbuseStore.countAttemptsByPhone`, `countDistinctPhonesByIp` | `countAttemptsByRecipient`, `countDistinctRecipientsByIp` |
 | `AuditEvent.phoneRedacted` | `recipientRedacted` |
 | error code `PHONE_RATE_LIMITED` | `RECIPIENT_RATE_LIMITED` |
+| metric `verify_sms_send_duration_seconds` | `verify_send_duration_seconds{channel}`, which also times email |
+| metric `verify_phone_rate_limit_hits_total` | `verify_recipient_rate_limit_hits_total{channel}` |
+| `verify_starts_blocked_total{reason="phone_rate_limit"}`, audit outcome `phone_rate_limit` | `recipient_rate_limit` |
+| span attribute `verify.phone_redacted`, audit meta `distinctPhones`, `LoggerAuditSink` key `phone` | `verify.recipient_redacted`, `distinctRecipients`, `recipient` |
 
+- `verify_starts_total`, `verify_starts_blocked_total`, `verify_checks_total` and `verify_check_duration_seconds` gain a `channel` label. Sums and rates over them are unchanged; a query that matches their exact label set needs the new label. Until 1.0 the old `verify_phone_rate_limit_hits_total` counts the same events as the new counter, and `verify_sms_send_duration_seconds` the SMS sends of the new histogram; do not add old and new.
+- The `phone_rate_limit` reason and audit outcome change with no alias, because emitting both would count every block twice. A TypeScript class implementing the exported `MetricsRecorder` interface must add `sendDuration` and `recipientRateLimitHits`.
 - The error code is the one change with no alias, because a response carries one code. A client that compares `code` with the string `'PHONE_RATE_LIMITED'` must change; one that compares with `VerifyErrorCode.PhoneRateLimited` keeps working, since that deprecated constant now holds the new code.
 - The `create*Stores` factories return the index store as `recipientIndex`, and also as `phoneIndex` for code that reads the old name. `phoneIndex` is not enumerable, so a spread such as `{ ...pgStores, recipientIndex: redisStores.recipientIndex }` uses the Redis index. On the factory object itself the two names always hold the same store, whichever one is set. A 0.8 setup that spreads and sets `phoneIndex` also still works, with a warning; that warning also fires when both names are written by hand with different stores, and `phoneIndex` is used.
 - A custom store written for 0.8 keeps running: core writes both field names and falls back to the old method names. Its TypeScript needs `recipient` on the records it returns.

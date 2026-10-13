@@ -25,7 +25,7 @@ export interface AuditEvent {
   ip?: string;
   channel: string;
   provider?: string;
-  /** Outcome string for the event, e.g. 'approved', 'cooldown', 'phone_rate_limit'. */
+  /** Outcome string for the event, e.g. 'approved', 'cooldown', 'recipient_rate_limit'. */
   outcome?: string;
   ts: Date;
   /** Free-form attributes for adapters that want richer audit. */

@@ -211,7 +211,7 @@ describe('VerifyService, attempts counted before the code is compared', () => {
     const metrics = (service as unknown as { metrics: { checksTotal: (o: string) => void } }).metrics;
     const counted = vi.spyOn(metrics, 'checksTotal');
     expect(await outcome(service.check({ to: PHONE, code: CODE }))).toBe('canceled');
-    expect(counted.mock.calls).toEqual([['no_pending']]);
+    expect(counted.mock.calls).toEqual([['no_pending', 'sms']]);
   });
 
   it('refuses a verify store without reserveAttempt on boot', () => {

@@ -213,7 +213,7 @@ export class VerifyService {
       new Set(this.deliverers.keys()),
     );
     const phone = recipient.key;
-    span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(phone));
+    this.setRecipientAttributes(span, phone);
     this.vlog(`start: phone=${this.redact(phone)} channel=${channel} ip=${params.ip ?? '-'}`);
 
     const cooldownSeconds =
@@ -342,7 +342,7 @@ export class VerifyService {
     );
     if (bookkeepingErr) throw await fail(bookkeepingErr, true);
     this.vlog(`start: dispatched sid=${sid} via ${provider}; cooldown=${cooldownSeconds}s`);
-    this.metrics.startsTotal();
+    this.metrics.startsTotal(channel);
     await this.audit({
       type: 'code_dispatched',
       sid,
@@ -374,13 +374,17 @@ export class VerifyService {
     span: import('@opentelemetry/api').Span,
   ): Promise<CheckResult> {
     const checkStart = Date.now();
-    const phone = recipientFromAddress(params.to).key;
-    span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(phone));
+    const checked = recipientFromAddress(params.to);
+    const phone = checked.key;
+    // check is not told the channel; it is inferred from `to`, as for the lookup.
+    const channel = checked.kind;
+    span.setAttribute(TELEMETRY.ATTR_CHANNEL, channel);
+    this.setRecipientAttributes(span, phone);
     this.vlog(`check: phone=${this.redact(phone)} ip=${params.ip ?? '-'}`);
     const sid = await this.recipientIndex.get(phone);
     if (!sid) {
-      this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checksTotal(CHECK_OUTCOME.NoPending, channel);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       throw new NoPendingVerificationException();
     }
     span.setAttribute(TELEMETRY.ATTR_SID, sid);
@@ -388,8 +392,8 @@ export class VerifyService {
     const record = await this.options.stores.verify.get(sid);
     if (!record) {
       await this.dropIndexEntry(phone, sid, 'a missing verification');
-      this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checksTotal(CHECK_OUTCOME.NoPending, channel);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       throw new NoPendingVerificationException();
     }
 
@@ -399,8 +403,8 @@ export class VerifyService {
     // let any code through while the recipient index still points at it.
     if (record.status !== 'pending') {
       await this.dropIndexEntry(phone, sid, 'a finished verification');
-      this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checksTotal(CHECK_OUTCOME.NoPending, channel);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
@@ -408,7 +412,7 @@ export class VerifyService {
     // database store's reservation judges it again by the database clock, and
     // the stricter of the two wins. Leaving it to the database alone would let
     // a code live past its TTL whenever the database clock runs behind.
-    if (record.expiresAt.getTime() <= Date.now()) throw await this.expire(phone, sid, record.channel, params.ip, checkStart);
+    if (record.expiresAt.getTime() <= Date.now()) throw await this.expire(phone, sid, channel, params.ip, checkStart);
 
     // The attempt is counted before the code is compared. A reservation is
     // atomic and refused once maxAttempts are spent, so of any number of
@@ -418,18 +422,18 @@ export class VerifyService {
       await this.options.stores.verify.reserveAttempt(sid);
     if (reservation === 'not-found' || !reserved) {
       await this.dropIndexEntry(phone, sid, 'a missing verification');
-      this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checksTotal(CHECK_OUTCOME.NoPending, channel);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       throw new NoPendingVerificationException();
     }
-    if (reservation === 'expired') throw await this.expire(phone, sid, record.channel, params.ip, checkStart);
+    if (reservation === 'expired') throw await this.expire(phone, sid, channel, params.ip, checkStart);
     if (reservation !== 'reserved') {
       // Every attempt spent, possibly by checks still in flight, or finished
       // meanwhile: no code is compared and nothing is written. A reservation
       // holder still comparing decides the record (approve, or cancel on the
       // last wrong code); cancelling here would refuse its correct code.
-      this.metrics.checksTotal(reservation === 'exhausted' ? CHECK_OUTCOME.LockedOut : CHECK_OUTCOME.NoPending);
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checksTotal(reservation === 'exhausted' ? CHECK_OUTCOME.LockedOut : CHECK_OUTCOME.NoPending, channel);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
@@ -448,8 +452,9 @@ export class VerifyService {
       await this.dropIndexEntry(phone, sid, `sid=${sid}`);
       this.metrics.checksTotal(
         transitioned ? CHECK_OUTCOME.Approved : CHECK_OUTCOME.LockedOut,
+        channel,
       );
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       await this.audit({
         type: transitioned ? 'verification_approved' : 'verification_canceled',
         sid,
@@ -474,14 +479,14 @@ export class VerifyService {
       if (!lockedOut) {
         // A correct code reserved alongside this one approved the record first:
         // this wrong code is refused, and nothing was locked out.
-        this.metrics.checksTotal(CHECK_OUTCOME.WrongCode);
-        this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+        this.metrics.checksTotal(CHECK_OUTCOME.WrongCode, channel);
+        this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
         return { sid, state: 'canceled', attemptsRemaining: 0 };
       }
       this.vlog(`check: locked out sid=${sid} after exhausting attempts`);
       await this.dropIndexEntry(phone, sid, 'a locked-out verification');
-      this.metrics.checksTotal(CHECK_OUTCOME.LockedOut);
-      this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+      this.metrics.checksTotal(CHECK_OUTCOME.LockedOut, channel);
+      this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
       await this.audit({
         type: 'verification_canceled',
         sid,
@@ -494,8 +499,8 @@ export class VerifyService {
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
     this.vlog(`check: wrong code sid=${sid} attemptsRemaining=${attemptsRemaining}`);
-    this.metrics.checksTotal(CHECK_OUTCOME.WrongCode);
-    this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+    this.metrics.checksTotal(CHECK_OUTCOME.WrongCode, channel);
+    this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
     // Another check holding a reservation may have approved or cancelled the
     // record while this one compared; answering pending would tell the client
     // to keep guessing at a record that can no longer approve (#105). This
@@ -547,6 +552,8 @@ export class VerifyService {
           {
             attributes: {
               [TELEMETRY.ATTR_PROVIDER]: deliverer.name,
+              [TELEMETRY.ATTR_RECIPIENT_REDACTED]: this.redact(recipient.key),
+              // The pre-0.9.0 name, until 1.0 (#7).
               [TELEMETRY.ATTR_PHONE_REDACTED]: this.redact(recipient.key),
               [TELEMETRY.ATTR_CHANNEL]: recipient.kind,
             },
@@ -556,14 +563,12 @@ export class VerifyService {
         ),
       );
       const seconds = (Date.now() - sendStart) / 1000;
-      // The histogram is SMS-only until it gains a channel label (#7).
-      if (recipient.kind === 'sms') {
-        this.metrics.smsSendDuration(
-          deliverer.name,
-          err ? SMS_OUTCOME.Failure : SMS_OUTCOME.Success,
-          seconds,
-        );
-      }
+      this.metrics.sendDuration(
+        recipient.kind,
+        deliverer.name,
+        err ? SMS_OUTCOME.Failure : SMS_OUTCOME.Success,
+        seconds,
+      );
       if (!err) return deliverer.name;
       lastError = err;
       const attemptMayHaveSent = err instanceof DeliveryTimeoutError || reportsMayHaveSent(err);
@@ -673,7 +678,7 @@ export class VerifyService {
     remainingMs: number,
   ): Promise<CooldownActiveException> {
     this.vlog(`start: blocked by cooldown for phone=${this.redact(phone)} remainingMs=${remainingMs}`);
-    this.metrics.startsBlocked(BLOCK_REASON.Cooldown);
+    this.metrics.startsBlocked(BLOCK_REASON.Cooldown, channel);
     await this.audit({
       type: 'rate_limited',
       recipientRedacted: this.redact(phone),
@@ -719,8 +724,8 @@ export class VerifyService {
   ): Promise<CodeExpiredException> {
     await this.options.stores.verify.markStatus(sid, 'expired');
     await this.dropIndexEntry(phone, sid, 'an expired verification');
-    this.metrics.checksTotal(CHECK_OUTCOME.Expired);
-    this.metrics.checkDuration((Date.now() - checkStart) / 1000);
+    this.metrics.checksTotal(CHECK_OUTCOME.Expired, channel);
+    this.metrics.checkDuration((Date.now() - checkStart) / 1000, channel);
     await this.audit({
       type: 'verification_expired',
       sid,
@@ -763,15 +768,15 @@ export class VerifyService {
       this.perRecipient.count,
       this.perRecipient.windowSeconds,
     );
-    this.metrics.phoneRateLimitHits();
+    this.metrics.recipientRateLimitHits(channel);
     if (phoneHit.exceeded) {
-      this.metrics.startsBlocked(BLOCK_REASON.PhoneRateLimit);
+      this.metrics.startsBlocked(BLOCK_REASON.RecipientRateLimit, channel);
       await this.audit({
         type: 'rate_limited',
         recipientRedacted: this.redact(phone),
         ip,
         channel,
-        outcome: 'phone_rate_limit',
+        outcome: 'recipient_rate_limit',
         meta: { resetAt: phoneHit.resetAt },
       });
       throw new RecipientRateLimitedException(phoneHit.resetAt);
@@ -784,7 +789,7 @@ export class VerifyService {
         perIp.windowSeconds,
       );
       if (ipHit.exceeded) {
-        this.metrics.startsBlocked(BLOCK_REASON.IpRateLimit);
+        this.metrics.startsBlocked(BLOCK_REASON.IpRateLimit, channel);
         await this.audit({
           type: 'rate_limited',
           recipientRedacted: this.redact(phone),
@@ -810,17 +815,24 @@ export class VerifyService {
       DEFAULTS.velocityWindowSeconds;
     const distinct = await this.countDistinctRecipientsByIp(ip, windowSeconds * 1000);
     if (distinct >= maxDistinct) {
-      this.metrics.startsBlocked(BLOCK_REASON.Abuse);
+      this.metrics.startsBlocked(BLOCK_REASON.Abuse, channel);
       await this.audit({
         type: 'abuse_detected',
         recipientRedacted: this.redact(phone),
         ip,
         channel,
         outcome: 'velocity',
-        meta: { distinctPhones: distinct },
+        // distinctPhones: the pre-0.9.0 key, until 1.0 (#7).
+        meta: { distinctRecipients: distinct, distinctPhones: distinct },
       });
       throw new AbuseVelocityException();
     }
+  }
+
+  private setRecipientAttributes(span: import('@opentelemetry/api').Span, key: string): void {
+    span.setAttribute(TELEMETRY.ATTR_RECIPIENT_REDACTED, this.redact(key));
+    // The pre-0.9.0 name, until 1.0 (#7).
+    span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(key));
   }
 
   private redact(key: string): string {
