@@ -181,7 +181,7 @@ The plan to 1.0 is tracked in [#89](https://github.com/jadedm/nestjs-verify/issu
 
 1. Store and policy names ([#8](https://github.com/jadedm/nestjs-verify/issues/8)) and metric and telemetry names ([#7](https://github.com/jadedm/nestjs-verify/issues/7)) were renamed from phone to recipient in 0.9.0, and metrics gained a `channel` label. The old names are removed in 1.0.
 2. Fixed in 0.9.0: a recipient-index write stalled for longer than the cooldown claim could replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). Index writes are now ordered by the record's `createdAt`. A newer start is created at least `cooldownSeconds` after the older one (and a full claim window, the larger of `cooldownSeconds` and the delivery time limit plus 30 seconds, after an older start that stalled), so only app servers whose clocks differ by more than that could misorder them. With `cooldownSeconds: 0` there is no cooldown or claim, and ordering rests on the clocks alone.
-3. A code's deadline is set by the server's clock and judged by both the server's and the database's, so steady skew between them shortens the effective TTL ([#108](https://github.com/jadedm/nestjs-verify/issues/108)). Planned for 0.9.0.
+3. Fixed in 0.9.0: a code's deadline was set by the app server's clock and judged by both that clock and the database's, so steady skew shortened the effective TTL ([#108](https://github.com/jadedm/nestjs-verify/issues/108)). The Postgres and Mongo stores now set the deadline from the database clock that judges it, and the start response carries that deadline.
 
 ### After 1.0
 

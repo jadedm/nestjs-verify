@@ -17,15 +17,6 @@ interface PhoneIndexDoc {
   createdAt?: Date;
 }
 
-const MAX_SET_ATTEMPTS = 3;
-
-// A filtered upsert that matched no document tries to insert one with this
-// _id, and fails with a duplicate key on _id when a document exists.
-const isDuplicateId = (err: unknown): boolean => {
-  const { code, keyPattern } = (err ?? {}) as { code?: unknown; keyPattern?: Record<string, unknown> };
-  return code === 11000 && keyPattern !== undefined && '_id' in keyPattern;
-};
-
 // Implements the pre-0.9.0 type name: the core range this adapter supports
 // starts before `RecipientIndexStore` existed (#8).
 export class MongoRecipientIndexStore implements PhoneIndexStore {
@@ -51,53 +42,52 @@ export class MongoRecipientIndexStore implements PhoneIndexStore {
   }
 
   /**
-   * With createdAt, one filtered upsert replaces the entry only when it has
-   * expired, has no createdAt, or is no newer than this one; a live newer
-   * entry is kept (#82). Without createdAt (a core before 0.9.0) it
-   * overwrites, as before.
+   * One upsert on _id whose pipeline decides, against the stored document,
+   * whether to replace it: only when it has expired by the server's clock,
+   * has no createdAt, or is no newer than this write (#82). Otherwise the
+   * stored fields are kept. Without createdAt (a core before 0.9.0) it always
+   * replaces. The server sets and judges the expiry, as its TTL monitor does
+   * (#108). The filter is an equality on _id alone, so the server retries an
+   * upsert that loses an insert race (MongoDB 4.2+), and $$NOW is read in the
+   * pipeline, where it is allowed. Values are $literal: in a pipeline a string
+   * starting with $ is a field path.
    */
   async set(phone: string, sid: string, ttlSeconds: number, createdAt?: Date): Promise<void> {
-    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+    const expiresAt = { $add: ['$$NOW', ttlSeconds * 1000] };
     if (!createdAt) {
-      await this.col.updateOne({ _id: phone }, { $set: { sid, expiresAt }, $unset: { createdAt: '' } }, { upsert: true });
+      await this.col.updateOne({ _id: phone }, [{ $set: { sid: { $literal: sid }, expiresAt } }, { $unset: 'createdAt' }], {
+        upsert: true,
+      });
       return;
     }
-    const replaceable = {
-      _id: phone,
-      $or: [{ createdAt: { $exists: false } }, { createdAt: { $lte: createdAt } }, { expiresAt: { $lte: new Date() } }],
+    const replace = {
+      $or: [
+        { $eq: [{ $type: '$createdAt' }, 'missing'] },
+        { $lte: ['$createdAt', { $literal: createdAt }] },
+        { $lte: ['$expiresAt', '$$NOW'] },
+      ],
     };
-    const update = { $set: { sid, expiresAt, createdAt } };
-    // An upsert that loses an insert race gets a duplicate key on _id. The
-    // document that won may be newer (keep it), older (replace it), or gone
-    // again by now (insert after all); each further round needs yet another
-    // writer, so the loop is short.
-    for (let attempt = 1; ; attempt++) {
-      if (await this.upsertIfReplaceable(replaceable, update)) return;
-      const replaced = await this.col.updateOne(replaceable, update);
-      if (replaced.matchedCount > 0) return;
-      if (await this.col.findOne({ _id: phone }, { projection: { _id: 1 } })) return;
-      if (attempt >= MAX_SET_ATTEMPTS) {
-        throw new Error(`MongoRecipientIndexStore: the index entry was not written after ${attempt} attempts`);
-      }
-    }
+    await this.col.updateOne(
+      { _id: phone },
+      [
+        { $set: { replace_: replace } },
+        {
+          $set: {
+            sid: { $cond: ['$replace_', { $literal: sid }, '$sid'] },
+            expiresAt: { $cond: ['$replace_', expiresAt, '$expiresAt'] },
+            createdAt: { $cond: ['$replace_', { $literal: createdAt }, '$createdAt'] },
+          },
+        },
+        { $unset: 'replace_' },
+      ],
+      { upsert: true },
+    );
   }
 
-  // True when written; false when the insert lost to an existing document.
-  private async upsertIfReplaceable(filter: object, update: object): Promise<boolean> {
-    try {
-      await this.col.updateOne(filter, update, { upsert: true });
-      return true;
-    } catch (err) {
-      if (isDuplicateId(err)) return false;
-      throw err;
-    }
-  }
-
+  // Live by the server's clock, which set the expiry (#108).
   async get(phone: string): Promise<string | null> {
-    const doc = await this.col.findOne({ _id: phone });
-    if (!doc) return null;
-    if (doc.expiresAt.getTime() <= Date.now()) return null;
-    return doc.sid;
+    const doc = await this.col.findOne({ _id: phone, $expr: { $gt: ['$expiresAt', '$$NOW'] } });
+    return doc?.sid ?? null;
   }
 
   async delete(phone: string): Promise<void> {

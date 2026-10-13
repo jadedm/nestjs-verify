@@ -58,7 +58,7 @@ Core (`packages/core/src`):
   before the send, or a send that definitely failed, releases the claim (after its cleanup), so it
   leaves no cooldown. If the send or the bookkeeping after it fails, the record and
   index are deleted and `SmsDispatchFailedException` (503) is thrown. `check`: phone index to sid, load record, only a
-  `pending` record can approve, expiry is checked lazily on read, then the store's atomic
+  `pending` record can approve; expiry is judged by the store, in `reserveAttempt`, on the clock that set it (#108); the store's atomic
   `reserveAttempt` counts the attempt before the code is compared; a refused reservation answers
   `canceled` without comparing, and a wrong code that spends the last attempt cancels the record.
 - `recipient.ts`: a recipient has a `key` (store key: E.164 phone, or the lowercased email) and an
@@ -105,6 +105,9 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
   `UPDATE ... WHERE attempts < max_attempts RETURNING`; Mongo with a filtered `findOneAndUpdate`.
   Counting after comparing let a burst of checks compare more codes than `maxAttempts` (0.8.0).
   `incrementAttempts` remains on the shipped stores, deprecated, and is no longer in the interface.
+- `VerifyStore.create(record, ttlSeconds)`: a database store sets `expiresAt` from its own clock
+  (`NOW()`, `$$NOW`), returns it, and refuses an existing sid. The clock that sets a deadline is the
+  one that judges it; core does not compare `expiresAt` with its own clock (#108).
 - `markStatus` only transitions out of `pending` and returns false if the record was no longer pending.
 - `RecipientIndexStore.set(recipient, sid, ttl, createdAt)` refuses, atomically, to replace a live
   entry whose `createdAt` is later; an expired entry, one without `createdAt`, or a call without it

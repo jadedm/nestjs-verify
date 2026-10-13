@@ -76,6 +76,16 @@ async function exerciseVerifyStore(name, verify) {
   const gotOld = await verify.get(oldStyle.sid);
   assert(gotOld?.recipient === '+14155550100' && gotOld?.phone === '+14155550100', 'a record written with phone only reads back under both names');
 
+  // Given a TTL, the store sets the deadline on its own clock and returns it,
+  // and an existing sid is still refused (#108).
+  const withTtl = recordFixture(`vr_ttl_${RUN}`, { expiresAt: new Date(0) });
+  const deadline = await verify.create(withTtl, 90);
+  const drift = Math.abs(deadline.getTime() - (Date.now() + 90_000));
+  assert(drift < 5_000, `create with a TTL returns the database deadline, off by ${drift} ms`);
+  assert(Math.abs((await verify.get(withTtl.sid)).expiresAt.getTime() - deadline.getTime()) < 1, 'the stored deadline is the one returned');
+  const dup = await verify.create(withTtl, 90).then(() => 'stored', (e) => e?.code ?? e?.message);
+  assert(dup !== 'stored', `create with an existing sid is refused, got ${dup}`);
+
   const r1 = await verify.incrementAttempts(v1.sid);
   assert(r1.outcome === 'incremented', 'first increment -> incremented');
   assert(r1.record?.attempts === 1, 'attempts now 1');
@@ -254,11 +264,17 @@ async function exerciseRecipientIndexStore(name, stores) {
   await phoneIndex.set(ex, 'vr_old', 60, at(-60_000));
   assert((await phoneIndex.get(ex)) === 'vr_old', 'an older createdAt replaces an expired entry');
 
-  const race = `race:${name}:${RUN}`;
-  const order = [3, 9, 0, 7, 1, 8, 2, 6, 4, 5];
-  const base = Date.now();
-  await Promise.all(order.map((i) => phoneIndex.set(race, `vr_${i}`, 60, new Date(base + i * 1000))));
-  assert((await phoneIndex.get(race)) === 'vr_9', `of 10 simultaneous writes the newest createdAt wins, got ${await phoneIndex.get(race)}`);
+  // 20 rounds of 10 simultaneous writes to a new key: the first writes race
+  // to insert it, and none may be lost or throw.
+  let wrong = 0;
+  for (let round = 0; round < 20; round++) {
+    const race = `race:${name}:${RUN}:${round}`;
+    const base = Date.now();
+    const order = [...Array(10).keys()].sort(() => Math.random() - 0.5);
+    await Promise.all(order.map((i) => phoneIndex.set(race, `vr_${i}`, 60, new Date(base + i * 1000))));
+    if ((await phoneIndex.get(race)) !== 'vr_9') wrong += 1;
+  }
+  assert(wrong === 0, `in 20 rounds of 10 simultaneous writes the newest createdAt wins every round, wrong in ${wrong}`);
 }
 
 async function exerciseAuditSink(name, audit) {
@@ -338,30 +354,50 @@ async function exerciseEmailFlow(name, stores) {
   assert(answers.every((a) => a === 'pending' || a === 'canceled'), `every other guess answers canceled, got ${answers.join(',')}`);
 }
 
-// This process's clock set the deadline, so the service holds it even while
-// the database still finds the code valid: the stricter clock wins (#105).
-// Mongo is not run here: its phone index judges expiry by this process's
-// clock, so the lookup would fail before the check reached the deadline.
-async function exerciseServerClockExpiry(name, stores) {
-  console.log(`\n--- ${name} check holds the deadline the server set ---`);
-  const service = new VerifyService({
-    email: { provider: new MockEmailProvider({ logToConsole: false }) },
-    stores,
-    code: { fixedCode: '424242', ttlSeconds: 60 },
-    attempts: { max: 3, cooldownSeconds: 0 },
-  });
-  const to = `clock.${name.toLowerCase()}.${RUN}@example.com`;
-  await service.start({ to, channel: 'email' });
+// The store that judges a code's deadline also sets it, on its own clock
+// (#108): the database for Postgres and Mongo. This process's clock, skewed
+// here by an hour, decides neither the deadline nor whether it has passed.
+async function exerciseDeadlineOnStoreClock(name, stores) {
+  console.log(`\n--- ${name} deadline set and judged on the database clock ---`);
+  const service = (ttlSeconds) =>
+    new VerifyService({
+      email: { provider: new MockEmailProvider({ logToConsole: false }) },
+      stores,
+      code: { fixedCode: '424242', ttlSeconds },
+      attempts: { max: 3, cooldownSeconds: 0 },
+    });
+  const tag = name.toLowerCase();
   const realDateNow = Date.now;
-  const realNow = realDateNow();
-  let answer;
-  try {
-    Date.now = () => realNow + 120_000;
-    answer = await service.check({ to, code: '000000' }).then((r) => r.state, (e) => e?.code ?? e?.message);
-  } finally {
-    Date.now = realDateNow;
-  }
-  assert(answer === 'CODE_EXPIRED', `a code past its deadline by the server clock, valid by the database clock -> CODE_EXPIRED, got ${answer}`);
+  const skewed = async (ms, fn) => {
+    const base = realDateNow();
+    Date.now = () => base + ms;
+    try {
+      return await fn();
+    } finally {
+      Date.now = realDateNow;
+    }
+  };
+  const answer = (p) => p.then((r) => r.state, (e) => e?.code ?? e?.message);
+
+  const ahead = `ahead.${tag}.${RUN}@example.com`;
+  const started = await skewed(3_600_000, () => service(60).start({ to: ahead, channel: 'email' }));
+  const drift = Math.abs(started.expiresAt.getTime() - (realDateNow() + 60_000));
+  assert(drift < 5_000, `the start answers the deadline the database set, not this clock's, off by ${drift} ms`);
+  const checked = await skewed(3_600_000, () => answer(service(60).check({ to: ahead, code: '000000' })));
+  assert(checked === 'pending', `a code inside its TTL by the database clock is checked with this clock an hour ahead, got ${checked}`);
+
+  const behind = `behind.${tag}.${RUN}@example.com`;
+  await skewed(-3_600_000, () => service(60).start({ to: behind, channel: 'email' }));
+  const fresh = await skewed(-3_600_000, () => answer(service(60).check({ to: behind, code: '000000' })));
+  assert(fresh === 'pending', `a fresh code is valid with this clock an hour behind (the deadline is not set in the database's past), got ${fresh}`);
+
+  // A real expiry: the index entry lapses with the record, so the refusal is
+  // either answer; what matters is that the code is no longer accepted.
+  const late = `late.${tag}.${RUN}@example.com`;
+  await skewed(-3_600_000, () => service(1).start({ to: late, channel: 'email' }));
+  await new Promise((r) => setTimeout(r, 2_100));
+  const expired = await skewed(-3_600_000, () => answer(service(1).check({ to: late, code: '424242' })));
+  assert(['CODE_EXPIRED', 'NO_PENDING_VERIFICATION'].includes(expired), `a code past its TTL on the database is refused with this clock an hour behind, got ${expired}`);
 }
 
 // A second start must wait while another instance holds the migration lock.
@@ -407,7 +443,7 @@ async function smokePostgres() {
   assert(column[0]?.data_type === 'timestamp with time zone', 'verify_phone_index.created_at exists (#82)');
   await exerciseAuditSink('Postgres', pg.audit);
   await exerciseEmailFlow('Postgres', pg);
-  await exerciseServerClockExpiry('Postgres', pg);
+  await exerciseDeadlineOnStoreClock('Postgres', pg);
   await pg.pool.end();
 }
 
@@ -422,6 +458,7 @@ async function smokeMongo() {
   await exerciseRateLimitStore('Mongo', mg.rateLimit);
   await exerciseCooldownStore('Mongo', mg.cooldown);
   await exerciseRecipientIndexStore('Mongo', mg);
+  await exerciseDeadlineOnStoreClock('Mongo', mg);
   await exerciseAuditSink('Mongo', mg.audit);
   await exerciseEmailFlow('Mongo', mg);
   await mg.close?.();

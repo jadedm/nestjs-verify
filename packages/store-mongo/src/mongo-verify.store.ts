@@ -85,10 +85,37 @@ export class MongoVerifyStore implements VerifyStore {
     ]);
   }
 
-  async create(v: VerificationRecord): Promise<void> {
+  /**
+   * Given ttlSeconds, the deadline is $$NOW + ttl, on the server clock that
+   * reserveAttempt and the TTL index judge it by, and is returned (#108).
+   * Without it (a core before 0.9.0) the record's own expiresAt is stored.
+   */
+  // Typed by the installed core's own declaration: before 0.9.0 it is
+  // Promise<void>, and an older core ignores the returned deadline (#108).
+  create(v: VerificationRecord, ttlSeconds?: number): ReturnType<VerifyStore['create']> {
+    return this.insert(v, ttlSeconds);
+  }
+
+  private async insert(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void> {
     // A core before 0.9.0 sets only `phone` (#8); the document keeps that field.
     const { sid, recipient, phone, ...rest } = v;
-    await this.col.insertOne({ _id: sid, ...rest, phone: (recipient ?? phone)! });
+    const doc = { ...rest, phone: (recipient ?? phone)! };
+    if (ttlSeconds === undefined) {
+      // The record keeps core's deadline, so nothing is returned.
+      await this.col.insertOne({ _id: sid, ...doc });
+      return;
+    }
+    // An update pipeline is the only write that can read $$NOW. Every stored
+    // record has createdAt, so the filter matches none and the upsert inserts;
+    // an existing sid fails on _id, as insertOne would. Values are $literal:
+    // in a pipeline a string starting with $ (a valid email can) is a field path.
+    const fields = Object.fromEntries(Object.entries(doc).map(([k, value]) => [k, { $literal: value }]));
+    const result = await this.col.findOneAndUpdate(
+      { _id: sid, createdAt: { $exists: false } },
+      [{ $set: { ...fields, expiresAt: { $add: ['$$NOW', ttlSeconds * 1000] } } }],
+      { upsert: true, returnDocument: 'after', includeResultMetadata: true },
+    );
+    return result.value!.expiresAt;
   }
 
   async get(sid: string): Promise<VerificationRecord | null> {
