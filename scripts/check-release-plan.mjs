@@ -74,10 +74,11 @@ const outOfRange = (coreVersion) =>
     .map((p) => ({ name: p.packageJson.name, range: p.packageJson.peerDependencies[CORE].replace(/^workspace:/, '') }))
     .filter(({ range }) => !semver.satisfies(coreVersion, range));
 
-// The packages with every adapter's core range widened to admit `coreVersion`,
-// as the PR preparing that minor would: from the range's lowest version up to
-// the next minor, whatever shape the range has (`>=a <b`, `^a`, `~a`, `a.x`).
-// Nothing is written to disk.
+// The packages with every adapter's core range set to end at the minor after
+// `coreVersion`, the 0.x shape: from the range's lowest version up to the next
+// minor, whatever shape the range has (`>=a <b`, `^a`, `~a`, `a.x`). Since 1.0
+// this narrows the real ranges; the probes using it check the config against
+// the tightest range an adapter could carry. Nothing is written to disk.
 const widenedTo = (coreVersion) => {
   const upper = `${semver.major(coreVersion)}.${semver.minor(coreVersion) + 1}.0`;
   const clone = structuredClone(packages);
@@ -172,9 +173,10 @@ const newCoreMinor =
   !coordinatedMajor && pendingPlan[CORE] && semver.minor(pendingPlan[CORE]) !== semver.minor(versionOf(CORE)) && pendingTooHigh.length === 0;
 const npmCoreRange = (name, version, workspaceRange) => {
   const view = spawnSync('npm', ['view', `${name}@${version}`, 'peerDependencies', '--json'], { encoding: 'utf8', timeout: 60_000 });
+  if (view.error) throw new Error(`npm view ${name}@${version} peerDependencies could not run: ${view.error.message}`);
   const unpublished = view.status !== 0 && /"code":\s*"E404"/.test(view.stdout);
   if (unpublished) return workspaceRange;
-  if (view.status !== 0) throw new Error(`npm view ${name}@${version} peerDependencies failed: ${(view.stdout + view.stderr).trim().split('\n').slice(-3).join(' ')}`);
+  if (view.status !== 0) throw new Error(`npm view ${name}@${version} peerDependencies failed: ${`${view.stdout}${view.stderr}`.trim().split('\n').slice(-3).join(' ')}`);
   const range = JSON.parse(view.stdout || '{}')[CORE];
   if (!range) throw new Error(`npm lists ${name}@${version} with no ${CORE} peer range`);
   return range;
@@ -206,8 +208,8 @@ const probe = (name, releases, pkgs, expect) => {
 const nextMinor = semver.inc(highest(linkedWith(CORE).map(versionOf)), 'minor');
 probe('core patch', { [CORE]: 'patch' }, packages, [CORE]);
 probe('core minor inside the ranges as they are', { [CORE]: 'minor' }, packages, [CORE]);
-probe('core minor, adapter ranges widened', { [CORE]: 'minor' }, widenedTo(nextMinor), [CORE]);
-probe('core minor + postgres minor, ranges widened', { [CORE]: 'minor', [POSTGRES]: 'minor' }, widenedTo(nextMinor), [CORE, POSTGRES]);
+probe('core minor, ranges ending at that minor', { [CORE]: 'minor' }, widenedTo(nextMinor), [CORE]);
+probe('core minor + postgres minor, ranges ending at that minor', { [CORE]: 'minor', [POSTGRES]: 'minor' }, widenedTo(nextMinor), [CORE, POSTGRES]);
 probe('mongo minor alone', { [MONGO]: 'minor' }, packages, [MONGO]);
 
 if (failures.length > 0) {

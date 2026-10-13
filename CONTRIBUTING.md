@@ -50,7 +50,7 @@ pnpm install
 pnpm build
 pnpm test           # unit tests
 pnpm typecheck
-pnpm test:adapters  # live integration smoke against Postgres + Mongo, requires Docker
+pnpm test:adapters  # live integration smoke against Postgres, Mongo and Redis, requires Docker
 ```
 
 The runnable example in `examples/basic-twilio-postgres` wires the core, the Twilio provider, and the Postgres store together. Useful for ad hoc verification.
@@ -60,9 +60,9 @@ The runnable example in `examples/basic-twilio-postgres` wires the core, the Twi
 A handful of things this codebase cares about. Knowing them up front saves review cycles.
 
 * **Strategy interfaces over concrete classes.** SMS providers, verification stores, and abuse stores all live behind small interfaces with multiple swappable implementations. Adapters import only types from the core package and never reach into its internals.
-* **Atomic operations in stores.** `incrementAttempts` must be one round trip and must atomically transition status to `canceled` on lockout. The Postgres adapter uses `UPDATE ... RETURNING` with a `CASE` expression. The Mongo adapter uses a `findOneAndUpdate` with an aggregation pipeline. New adapters must hold the same contract.
+* **Atomic operations in stores.** `reserveAttempt` must be one atomic operation that counts an attempt only while the record is `pending`, not past `expiresAt` and below `maxAttempts`, and never changes the status. The Postgres adapter uses one `UPDATE ... WHERE attempts < max_attempts RETURNING`; the Mongo adapter a filtered `findOneAndUpdate`. New adapters must hold the same contract, and `scripts/smoke-adapters.mjs` checks it.
 * **Peer deps stay external in tsup.** Never bundle `@nestjs/common`, `@nestjs/core`, `@nestjs/cache-manager`, `cache-manager`, `reflect-metadata`, `rxjs`, or any provider SDK. Bundling these causes class identity drift in the consumer at runtime, which we have already paid for once.
-* **Semver since 1.0.** A breaking change is a `major` changeset, a new feature a `minor`, a fix a `patch`. Each adapter's core peer range ends at the next core major (`workspace:>=0.9.0 <2.0.0`), so a core minor or patch releases no adapter. Raise an adapter's lower bound by hand, with a changeset for that adapter, when it starts relying on something newer in core. `pnpm check:release-plan` fails if the pending changesets would carry a package to a new major by accident, and names the packages.
+* **Semver since 1.0.** A breaking change is a `major` changeset, a new feature a `minor`, a fix a `patch`. Each adapter's core peer range ends at the next core major (`workspace:>=0.9.0 <2.0.0`), so a core minor or patch releases no adapter. Raise an adapter's lower bound by hand, with a changeset for that adapter, when it starts relying on something newer in core. `pnpm check:release-plan` fails if the pending changesets would carry a package to a new major by accident, and names the packages. A deliberate major needs a `major` changeset for every public package, all landing on the same X.0.0.
 
 ## Releases
 
@@ -74,7 +74,7 @@ Releases are driven by Changesets. Once you have a Trusted Publisher configured 
 4. Review and merge the "Version Packages" PR.
 5. The release workflow publishes to npm using GitHub's OIDC token. No NPM_TOKEN is needed.
 
-If Trusted Publishing is not yet configured, the maintainer publishes manually with `npm publish --otp=...` once per published package.
+If Trusted Publishing is not yet configured, the maintainer publishes from their own terminal with `scripts/publish-manual.sh` after `npm login`.
 
 ## Reporting bugs and proposing features
 
