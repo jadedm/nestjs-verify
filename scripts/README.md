@@ -37,6 +37,8 @@ node scripts/smoke-adapters.mjs
 
 The script imports each backend's package only when that backend runs.
 
+Two cases write a record that has already expired and expect `reserveAttempt` to answer `expired`. Mongo's TTL monitor can delete such a record between the write and the call; when the record is really gone, the case retries with a fresh one, up to 3 times, and logs a `retry:` line (#109). `SMOKE_SIMULATE_SWEEP=<n>` deletes the fixture before the first n tries of each case, and `SMOKE_SIMULATE_NOT_FOUND=1` answers `not-found` while the record exists, which must fail without a retry.
+
 ## check-packed.mjs
 
 Packs the packages, installs them into a clean project as a consumer would (with each peer at its oldest supported major, `--profile lowest`, or its newest, `--profile highest`), and checks that each loads by name as ESM and CommonJS, ships its types and main files, imports nothing it does not declare, type-checks strictly, and loads without its optional peers.
