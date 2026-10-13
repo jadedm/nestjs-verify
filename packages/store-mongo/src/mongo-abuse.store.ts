@@ -12,7 +12,7 @@ export interface MongoAbuseStoreOptions {
 }
 
 // The recipient is stored as `phone`, the field name since 0.1 (#8).
-interface SendAttemptDoc extends Omit<SendAttempt, 'ts' | 'recipient' | 'phone'> {
+interface SendAttemptDoc extends Omit<SendAttempt, 'ts' | 'recipient'> {
   phone: string;
   ts: Date;
 }
@@ -54,9 +54,9 @@ export class MongoAbuseStore implements AbuseStore {
   }
 
   async recordSendAttempt(s: SendAttempt): Promise<void> {
-    // A core before 0.9.0 sets only `phone` (#8); the document keeps that field.
-    const { recipient, phone, ...rest } = s;
-    await this.col.insertOne({ ...rest, phone: (recipient ?? phone)!, ts: s.ts ?? new Date() });
+    // The document keeps the field's pre-0.9.0 name, `phone` (#8).
+    const { recipient, ...rest } = s;
+    await this.col.insertOne({ ...rest, phone: recipient, ts: s.ts ?? new Date() });
   }
 
   async countAttemptsByIp(ip: string, windowMs: number): Promise<number> {
@@ -82,16 +82,6 @@ export class MongoAbuseStore implements AbuseStore {
       ts: { $gt: cutoff },
     });
     return phones.length;
-  }
-
-  /** @deprecated Renamed to `countAttemptsByRecipient` in 0.9.0 (#8); removed in 1.0. */
-  async countAttemptsByPhone(phone: string, windowMs: number): Promise<number> {
-    return this.countAttemptsByRecipient(phone, windowMs);
-  }
-
-  /** @deprecated Renamed to `countDistinctRecipientsByIp` in 0.9.0 (#8); removed in 1.0. */
-  async countDistinctPhonesByIp(ip: string, windowMs: number): Promise<number> {
-    return this.countDistinctRecipientsByIp(ip, windowMs);
   }
 
   async close(): Promise<void> {

@@ -13,8 +13,6 @@ export interface RedisStores {
   rateLimit: RedisRateLimitStore;
   cooldown: RedisCooldownStore;
   recipientIndex: RedisRecipientIndexStore;
-  /** @deprecated The same object as `recipientIndex`, under its pre-0.9.0 name; removed in 1.0. */
-  phoneIndex: RedisRecipientIndexStore;
 }
 
 /**
@@ -37,7 +35,7 @@ export function createRedisStores(
     client: opts.client,
     keyPrefix: opts.keyPrefix ? opts.keyPrefix + 'idx:' : undefined,
   });
-  const stores = {
+  return {
     rateLimit: new RedisRateLimitStore({
       client: opts.client,
       keyPrefix: opts.keyPrefix ? opts.keyPrefix + 'rl:' : undefined,
@@ -47,19 +45,5 @@ export function createRedisStores(
       keyPrefix: opts.keyPrefix ? opts.keyPrefix + 'cd:' : undefined,
     }),
     recipientIndex,
-  };
-  // `phoneIndex`, the pre-0.9.0 name (#8), reads and writes `recipientIndex`,
-  // so the two cannot disagree on this object, however it is changed. It is
-  // not enumerable, so a spread such as `{ ...stores, recipientIndex: other }`
-  // leaves it out. The type still lists it; on a spread copy it is undefined.
-  return Object.defineProperty(stores, 'phoneIndex', {
-    get: () => stores.recipientIndex,
-    set: (store) => {
-      stores.recipientIndex = store;
-    },
-    enumerable: false,
-    configurable: true,
-  }) as typeof stores & {
-    phoneIndex: typeof recipientIndex;
   };
 }

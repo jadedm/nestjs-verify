@@ -36,32 +36,6 @@ describe('MemoryVerifyStore', () => {
     expect(await store.get('vr_missing')).toBeNull();
   });
 
-  it('increments attempts atomically and reports outcome', async () => {
-    await store.create(fixture({ maxAttempts: 3 }));
-    const r1 = await store.incrementAttempts('vr_test_1');
-    expect(r1.outcome).toBe('incremented');
-    expect(r1.record?.attempts).toBe(1);
-  });
-
-  it('flips to canceled on the attempt that hits maxAttempts', async () => {
-    await store.create(fixture({ attempts: 2, maxAttempts: 3 }));
-    const r = await store.incrementAttempts('vr_test_1');
-    expect(r.outcome).toBe('locked-out');
-    expect(r.record?.status).toBe('canceled');
-  });
-
-  it('reports not-pending when status already terminal', async () => {
-    await store.create(fixture({ status: 'approved' }));
-    const r = await store.incrementAttempts('vr_test_1');
-    expect(r.outcome).toBe('not-pending');
-  });
-
-  it('reports not-found for unknown sid', async () => {
-    const r = await store.incrementAttempts('vr_missing');
-    expect(r.outcome).toBe('not-found');
-    expect(r.record).toBeNull();
-  });
-
   it('markStatus succeeds only when pending', async () => {
     await store.create(fixture());
     expect(await store.markStatus('vr_test_1', 'approved')).toBe(true);

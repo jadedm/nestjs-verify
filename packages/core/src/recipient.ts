@@ -11,7 +11,7 @@ export type DeliveryKind = 'sms' | 'email';
 export interface Recipient {
   kind: DeliveryKind;
   /**
-   * Store key (`phone` in store interfaces). For email, the whole address
+   * Store key (`recipient` in store interfaces). For email, the whole address
    * lowercased, so case variants of one mailbox share one cooldown, rate
    * limit and pending verification.
    */

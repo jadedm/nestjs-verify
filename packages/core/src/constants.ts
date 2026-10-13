@@ -28,8 +28,6 @@ export const TELEMETRY = {
 
   // Attribute keys
   ATTR_RECIPIENT_REDACTED: 'verify.recipient_redacted',
-  /** @deprecated Set alongside ATTR_RECIPIENT_REDACTED until 1.0 (#7). */
-  ATTR_PHONE_REDACTED: 'verify.phone_redacted',
   ATTR_CHANNEL: 'verify.channel',
   ATTR_OUTCOME: 'verify.outcome',
   ATTR_SID: 'verify.sid',
@@ -47,16 +45,6 @@ export const METRICS = {
   COUNTER_CHECKS: 'checks_total',
   COUNTER_RECIPIENT_RATE_LIMIT_HITS: 'recipient_rate_limit_hits_total',
   HIST_SEND_DURATION: 'send_duration_seconds',
-  /**
-   * @deprecated Counts the same events as COUNTER_RECIPIENT_RATE_LIMIT_HITS,
-   * with no channel label; do not add the two. Emitted until 1.0 (#7).
-   */
-  COUNTER_PHONE_RATE_LIMIT_HITS: 'phone_rate_limit_hits_total',
-  /**
-   * @deprecated The SMS sends of HIST_SEND_DURATION, with no channel label; do
-   * not add the two. Emitted until 1.0 (#7).
-   */
-  HIST_SMS_SEND_DURATION: 'sms_send_duration_seconds',
   HIST_CHECK_DURATION: 'check_duration_seconds',
 
   // Label keys
@@ -72,11 +60,6 @@ export const BLOCK_REASON = {
   Cooldown: 'cooldown',
   /** Was 'phone_rate_limit' before 0.9.0 (#7). */
   RecipientRateLimit: 'recipient_rate_limit',
-  /**
-   * @deprecated Renamed to RecipientRateLimit in 0.9.0, and its value changed
-   * with it; removed in 1.0.
-   */
-  PhoneRateLimit: 'recipient_rate_limit',
   IpRateLimit: 'ip_rate_limit',
   Abuse: 'abuse',
 } as const;

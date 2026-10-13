@@ -84,7 +84,7 @@ Core (`packages/core/src`):
   logged and never fail a verification.
 
 Five store interfaces in `packages/core/src/interfaces`: `VerifyStore`, `AbuseStore` (optional),
-`RateLimitStore`, `CooldownStore`, `RecipientIndexStore` (`PhoneIndexStore` before 0.9.0), plus an optional `AuditSink`. Core ships
+`RateLimitStore`, `CooldownStore`, `RecipientIndexStore`, plus an optional `AuditSink`. Core ships
 in-memory versions (`createMemoryStores()`). Each backend package exposes a `create*Stores` factory:
 
 - Postgres and Mongo implement all five plus an audit sink. Their `create*Stores` factory runs
@@ -104,7 +104,6 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
   simultaneous checks at most `maxAttempts` compare a code. Postgres does this with one
   `UPDATE ... WHERE attempts < max_attempts RETURNING`; Mongo with a filtered `findOneAndUpdate`.
   Counting after comparing let a burst of checks compare more codes than `maxAttempts` (0.8.0).
-  `incrementAttempts` remains on the shipped stores, deprecated, and is no longer in the interface.
 - `VerifyStore.create(record, ttlSeconds)`: a database store sets `expiresAt` from its own clock
   (`NOW()`, `$$NOW`), returns it, and refuses an existing sid. The clock that sets a deadline is the
   one that judges it; core does not compare `expiresAt` with its own clock (#108).
@@ -121,13 +120,11 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
 - Adapters import from the `@jadedm/nestjs-verify` entry point only, never core internals, and almost
   only types. The exception is `provider-gupshup`, which imports `asyncHandler` as a value. Core is a peer
   dependency of each adapter, bounded to the core minors it is known to work with (Releases, below).
-  An adapter names only core types that exist at its range's floor: the index stores implement
-  `PhoneIndexStore`, not `RecipientIndexStore`, and the Postgres and Mongo stores inline core's
-  `ReserveResult`.
-- Phone names renamed to recipient names in 0.9.0 (#8) keep working until 1.0 in both directions:
-  core writes `recipient` and `phone` and falls back to the old store method names; the 0.9 adapters
-  accept either field on write and return both on read, so they still run under a 0.8 core. The
-  database keeps `phone` columns and fields.
+  An adapter names only core types that exist at its range's floor.
+- Names that said phone were renamed to recipient names in 0.9.0 (#8, #7) and the old ones removed in
+  1.0 (#124). Core refuses at boot the removed option names (`stores.phoneIndex`,
+  `rateLimit.perPhone`, `abuse.maxDistinctPhonesPerIp`), naming the new one, so an old config is not
+  quietly ignored. Database columns and fields keep the name `phone`.
 
 ## Build rules
 
@@ -174,8 +171,8 @@ agent's shell) the publish fails with `EOTP`, so hand the command over. Every ve
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
 
-Each adapter's core peer range names the core versions it works with: `workspace:>=0.6.8 <0.10.0`
-today. Changesets bumps a package at major when a release leaves its peer range, and in 0.x that is
+Each adapter's core peer range names the core versions it works with: `workspace:>=0.9.0 <0.10.0`
+for the store adapters and `workspace:>=0.6.8 <0.10.0` for the providers today (#125 moves both to `^1.0.0`). Changesets bumps a package at major when a release leaves its peer range, and in 0.x that is
 1.0.0; for core, twilio, postgres and ses the linked group then carries the others with it (#10). So
 the PR that adds a core `minor` changeset also widens the range (`<0.8.0`) of every adapter that works
 with the new core, with a changeset for each so npm gets the new range, and an adapter that needs code

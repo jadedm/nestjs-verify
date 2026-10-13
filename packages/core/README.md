@@ -102,9 +102,9 @@ With `observability.metrics.enabled` and `prom-client` installed, the service re
 | `verify_send_duration_seconds` | `channel`, `provider`, `outcome` (`success`, `failure`) |
 | `verify_recipient_rate_limit_hits_total` | `channel` |
 
-Until 1.0 two deprecated series count the same events under their pre-0.9.0 names: `verify_sms_send_duration_seconds` (SMS sends only, no `channel`) and `verify_phone_rate_limit_hits_total` (no `channel`). Do not add them to the new series. Several services may share one registry; they share its collectors.
+Several services may share one registry; they share its collectors.
 
-Spans carry `verify.recipient_redacted` (and, until 1.0, `verify.phone_redacted`), `verify.channel`, `verify.sid` and, on sends, `verify.provider`.
+Spans carry `verify.recipient_redacted`, `verify.channel`, `verify.sid` and, on sends, `verify.provider`.
 
 ## The five stores
 

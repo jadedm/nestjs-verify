@@ -31,7 +31,7 @@ import {
   hashCode,
 } from './code/code-gen.js';
 import { buildDeliverers, Deliverer, reportsMayHaveSent } from './dispatch.js';
-import { distinctRecipientCounter, DistinctRecipientCounter, pickIndexStore, pickRenamed } from './recipient-names.js';
+import { refuseRemovedNames } from './removed-names.js';
 import type { RecipientIndexStore } from './interfaces/recipient-index-store.interface.js';
 import type { RateLimitPolicy } from './interfaces/module-options.interface.js';
 import {
@@ -106,7 +106,6 @@ export class VerifyService {
   private readonly recipientIndex: RecipientIndexStore;
   private readonly perRecipient: RateLimitPolicy;
   private readonly maxDistinctRecipientsPerIp: number;
-  private readonly countDistinctRecipientsByIp: DistinctRecipientCounter | undefined;
 
   constructor(
     @Inject(VERIFY_MODULE_OPTIONS)
@@ -126,6 +125,7 @@ export class VerifyService {
         `delivery.attemptTimeoutMs and delivery.totalTimeoutMs must be positive, finite numbers of milliseconds, at most ${MAX_TIMER_MS}.`,
       );
     }
+    refuseRemovedNames(options);
     // A store written before 0.7.0 compiles only with a cast or in plain JS;
     // refuse it on boot rather than on the first start.
     const cooldown = options.stores.cooldown as unknown as Record<string, unknown>;
@@ -137,23 +137,18 @@ export class VerifyService {
     if (typeof verify.reserveAttempt !== 'function') {
       throw new Error('stores.verify must implement reserveAttempt (required since 0.8.0).');
     }
-    const recipientIndex = pickIndexStore(this.log, options.stores.recipientIndex, options.stores.phoneIndex);
+    const recipientIndex = options.stores.recipientIndex as RecipientIndexStore | undefined;
     if (!recipientIndex) throw new Error('stores.recipientIndex is required.');
     if (typeof (recipientIndex as unknown as Record<string, unknown>).deleteIfMatches !== 'function') {
       throw new Error('stores.recipientIndex must implement deleteIfMatches (required since 0.7.0, #9).');
     }
     this.recipientIndex = recipientIndex;
-    this.perRecipient =
-      pickRenamed(this.log, options.rateLimit?.perRecipient, options.rateLimit?.perPhone, [
-        'rateLimit.perRecipient',
-        'rateLimit.perPhone',
-      ]) ?? DEFAULTS.perRecipient;
-    this.maxDistinctRecipientsPerIp =
-      pickRenamed(this.log, options.abuse?.maxDistinctRecipientsPerIp, options.abuse?.maxDistinctPhonesPerIp, [
-        'abuse.maxDistinctRecipientsPerIp',
-        'abuse.maxDistinctPhonesPerIp',
-      ]) ?? DEFAULTS.maxDistinctRecipientsPerIp;
-    this.countDistinctRecipientsByIp = distinctRecipientCounter(this.log, options.stores.abuse);
+    this.perRecipient = options.rateLimit?.perRecipient ?? DEFAULTS.perRecipient;
+    this.maxDistinctRecipientsPerIp = options.abuse?.maxDistinctRecipientsPerIp ?? DEFAULTS.maxDistinctRecipientsPerIp;
+    const abuse = options.stores.abuse as unknown as Record<string, unknown> | undefined;
+    if (abuse && typeof abuse.countDistinctRecipientsByIp !== 'function') {
+      throw new Error('stores.abuse must implement countDistinctRecipientsByIp (named countDistinctPhonesByIp before 0.9.0).');
+    }
     this.metrics = createMetricsRecorder({
       enabled: options.observability?.metrics?.enabled,
       registry: options.observability?.metrics?.registry,
@@ -254,8 +249,6 @@ export class VerifyService {
     const record: VerificationRecord = {
       sid,
       recipient: phone,
-      // Read by verify stores written before 0.9.0 (#8).
-      phone,
       channel,
       codeHash: hashCode(code, salt),
       salt,
@@ -566,8 +559,6 @@ export class VerifyService {
             attributes: {
               [TELEMETRY.ATTR_PROVIDER]: deliverer.name,
               [TELEMETRY.ATTR_RECIPIENT_REDACTED]: this.redact(recipient.key),
-              // The pre-0.9.0 name, until 1.0 (#7).
-              [TELEMETRY.ATTR_PHONE_REDACTED]: this.redact(recipient.key),
               [TELEMETRY.ATTR_CHANNEL]: recipient.kind,
             },
           },
@@ -617,7 +608,6 @@ export class VerifyService {
     await this.options.stores.abuse?.recordSendAttempt({
       sid: sent.sid,
       recipient: sent.phone,
-      phone: sent.phone,
       ip: sent.ip,
       channel: sent.channel,
       provider: sent.provider,
@@ -655,7 +645,6 @@ export class VerifyService {
       await this.options.stores.abuse?.recordSendAttempt({
         sid: ctx.sid,
         recipient: ctx.phone,
-        phone: ctx.phone,
         ip: ctx.ip,
         channel: ctx.channel,
         provider: this.chainName(ctx.kind),
@@ -821,12 +810,13 @@ export class VerifyService {
     ip: string | undefined,
     channel: VerificationChannel,
   ): Promise<void> {
-    if (!ip || !this.countDistinctRecipientsByIp) return;
+    const abuse = this.options.stores.abuse;
+    if (!ip || !abuse) return;
     const maxDistinct = this.maxDistinctRecipientsPerIp;
     const windowSeconds =
       this.options.abuse?.velocityWindowSeconds ??
       DEFAULTS.velocityWindowSeconds;
-    const distinct = await this.countDistinctRecipientsByIp(ip, windowSeconds * 1000);
+    const distinct = await abuse.countDistinctRecipientsByIp(ip, windowSeconds * 1000);
     if (distinct >= maxDistinct) {
       this.metrics.startsBlocked(BLOCK_REASON.Abuse, channel);
       await this.audit({
@@ -835,8 +825,7 @@ export class VerifyService {
         ip,
         channel,
         outcome: 'velocity',
-        // distinctPhones: the pre-0.9.0 key, until 1.0 (#7).
-        meta: { distinctRecipients: distinct, distinctPhones: distinct },
+        meta: { distinctRecipients: distinct },
       });
       throw new AbuseVelocityException();
     }
@@ -844,8 +833,6 @@ export class VerifyService {
 
   private setRecipientAttributes(span: import('@opentelemetry/api').Span, key: string): void {
     span.setAttribute(TELEMETRY.ATTR_RECIPIENT_REDACTED, this.redact(key));
-    // The pre-0.9.0 name, until 1.0 (#7).
-    span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(key));
   }
 
   private redact(key: string): string {
@@ -864,8 +851,7 @@ export class VerifyService {
   ): Promise<void> {
     const sink = this.options.stores.audit;
     if (!sink) return;
-    // phoneRedacted: the pre-0.9.0 name, read by sinks written before it (#8).
-    const event = { ts: new Date(), ...partial, phoneRedacted: partial.recipientRedacted };
+    const event = { ts: new Date(), ...partial };
     const [, err] = await asyncHandler(sink.record(event));
     if (err) this.log.warn(`audit sink failed: ${err.message}`);
   }

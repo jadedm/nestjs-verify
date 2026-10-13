@@ -1,5 +1,4 @@
 import {
-  IncrementResult,
   ReserveResult,
   VerificationRecord,
   VerificationStatus,
@@ -41,26 +40,6 @@ export class MemoryVerifyStore implements VerifyStore {
     const updated: VerificationRecord = { ...r, attempts: r.attempts + 1 };
     this.records.set(sid, updated);
     return { record: { ...updated }, outcome: 'reserved' };
-  }
-
-  /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
-  async incrementAttempts(sid: string): Promise<IncrementResult> {
-    const r = this.records.get(sid);
-    if (!r) return { record: null, outcome: 'not-found' };
-    if (r.status !== 'pending')
-      return { record: { ...r }, outcome: 'not-pending' };
-    const nextAttempts = r.attempts + 1;
-    const lockedOut = nextAttempts >= r.maxAttempts;
-    const updated: VerificationRecord = {
-      ...r,
-      attempts: nextAttempts,
-      status: lockedOut ? 'canceled' : r.status,
-    };
-    this.records.set(sid, updated);
-    return {
-      record: { ...updated },
-      outcome: lockedOut ? 'locked-out' : 'incremented',
-    };
   }
 
   async markStatus(

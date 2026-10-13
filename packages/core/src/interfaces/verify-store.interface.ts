@@ -10,11 +10,6 @@ export interface VerificationRecord {
   sid: string;
   /** The recipient's store key: an E.164 phone or a lowercased email. */
   recipient: string;
-  /**
-   * @deprecated Same value as `recipient`, for stores written before 0.9.0
-   * (#8). Core writes both and reads `recipient` first; removed in 1.0.
-   */
-  phone?: string;
   channel: VerificationChannel;
   codeHash: string;
   salt: string;
@@ -23,12 +18,6 @@ export interface VerificationRecord {
   status: VerificationStatus;
   createdAt: Date;
   expiresAt: Date;
-}
-
-/** @deprecated The service no longer uses it; see `ReserveResult`. */
-export interface IncrementResult {
-  record: VerificationRecord | null;
-  outcome: 'incremented' | 'locked-out' | 'not-pending' | 'not-found';
 }
 
 export interface ReserveResult {

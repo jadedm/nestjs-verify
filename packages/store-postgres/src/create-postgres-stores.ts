@@ -19,8 +19,6 @@ export interface PostgresStores {
   rateLimit: PostgresRateLimitStore;
   cooldown: PostgresCooldownStore;
   recipientIndex: PostgresRecipientIndexStore;
-  /** @deprecated The same object as `recipientIndex`, under its pre-0.9.0 name; removed in 1.0. */
-  phoneIndex: PostgresRecipientIndexStore;
   audit: PostgresAuditSink;
   /** The shared pg.Pool. Use this to close cleanly on shutdown. */
   pool: Pool;
@@ -62,28 +60,13 @@ export async function createPostgresStores(
     throw err;
   }
 
-  const recipientIndex = new PostgresRecipientIndexStore({ pool });
-  const stores = {
+  return {
     verify: new PostgresVerifyStore({ pool }),
     abuse: new PostgresAbuseStore({ pool }),
     rateLimit: new PostgresRateLimitStore({ pool }),
     cooldown: new PostgresCooldownStore({ pool }),
-    recipientIndex,
+    recipientIndex: new PostgresRecipientIndexStore({ pool }),
     audit: new PostgresAuditSink({ pool }),
     pool,
-  };
-  // `phoneIndex`, the pre-0.9.0 name (#8), reads and writes `recipientIndex`,
-  // so the two cannot disagree on this object, however it is changed. It is
-  // not enumerable, so a spread such as `{ ...stores, recipientIndex: other }`
-  // leaves it out. The type still lists it; on a spread copy it is undefined.
-  return Object.defineProperty(stores, 'phoneIndex', {
-    get: () => stores.recipientIndex,
-    set: (store) => {
-      stores.recipientIndex = store;
-    },
-    enumerable: false,
-    configurable: true,
-  }) as typeof stores & {
-    phoneIndex: typeof recipientIndex;
   };
 }
