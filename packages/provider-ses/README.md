@@ -39,5 +39,5 @@ Node 22.12 or newer, as for the core package.
 
 ## Peers
 
-- `@jadedm/nestjs-verify` within the range in `peerDependencies` (one or more 0.x minors)
+- `@jadedm/nestjs-verify` within the range in `peerDependencies` (core 0.9 and every 1.x)
 - `@aws-sdk/client-sesv2` 3.x

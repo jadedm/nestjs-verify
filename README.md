@@ -2,6 +2,20 @@
 
 Self-hosted OTP for NestJS, in the shape of Twilio Verify. One POST starts a verification, another checks the code. Code generation, TTL, attempt caps, cooldowns, rate limits, and abuse heuristics live in the library. You pick the SMS or email provider and the stores.
 
+## What 1.0 promises
+
+Every exported interface, type, option, error code, metric name and store contract stays compatible through 1.x. A 1.x minor adds; it never removes or changes what you already use. A breaking change waits for 2.0. Node 22.12 or newer and Nest 11 or 12 are supported; a new Node or Nest major is added in a minor, and dropping one is a 2.0 change. All seven packages are at 1.0.0 together, and every adapter accepts core `>=0.9.0 <2.0.0`.
+
+## Upgrading to 1.0.0
+
+Upgrade to 0.9 first and clear its deprecation warnings: 1.0 removes everything 0.9 kept under its old name (the table below).
+
+- Requirements: Node 22.12 or newer; `@nestjs/common` and `@nestjs/core` 11 or 12; `@nestjs/swagger` 11 or 12, matching Nest's major; `class-validator` 0.14 or 0.15; `rxjs` 7.1 or newer.
+- Removed: every 0.9 alias in the table below, the metric series `verify_sms_send_duration_seconds` and `verify_phone_rate_limit_hits_total`, the span attribute `verify.phone_redacted`, the audit meta `distinctPhones`, the `LoggerAuditSink` key `phone`, `MetricsRecorder.smsSendDuration` and `phoneRateLimitHits`, and `incrementAttempts` with `IncrementResult` (unused since 0.8).
+- `stores.phoneIndex`, `rateLimit.perPhone` and `abuse.maxDistinctPhonesPerIp` are refused at boot with an error naming the 1.0 name, so an old config is never quietly ignored.
+- Custom stores: `AbuseStore` requires `recordSendAttempt` and `countDistinctRecipientsByIp` only; records, send attempts and audit events carry `recipient` and `recipientRedacted`.
+- No database migration: tables, columns and fields keep their names.
+
 ## Upgrading to 0.9.0
 
 0.9.0 renames everything that said phone but also holds an email address (#8). The old names keep working in 0.9 and log a deprecation warning at boot; 1.0 removes them.
@@ -197,7 +211,7 @@ The trade-off is honest: you trade Twilio's compliance and managed surface for c
 
 ## Maturity
 
-Beta. The cryptographic primitives are sound and the store atomicity is correct. The library is missing several features expected of enterprise compliance environments. Read [the full maturity and limitations section](./packages/core/README.md#maturity-and-limitations) in the core package README before adopting. The work towards 1.0, and the decisions still open, are tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89).
+1.0: the public interface is frozen through 1.x (see What 1.0 promises, above). The cryptographic primitives are sound and the store atomicity is correct; several features expected of enterprise compliance environments are not in it. Read [the full maturity and limitations section](./packages/core/README.md#maturity-and-limitations) in the core package README before adopting.
 
 ## Local development
 

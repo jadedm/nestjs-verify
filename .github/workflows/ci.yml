@@ -28,8 +28,8 @@ jobs:
       - run: pnpm check:exports
       - run: pnpm typecheck
       - run: pnpm test
-      # A 0.x minor must stay 0.x: fails if Changesets would plan any package
-      # at 1.0.0 (#10).
+      # No accidental new major: fails if Changesets would carry a package to
+      # a new major unless every package asks for it together (#10, #125).
       - run: pnpm check:release-plan
 
   packed:
