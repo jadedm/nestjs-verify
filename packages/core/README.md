@@ -122,9 +122,11 @@ You can use a single backend for all five, or split durable vs ephemeral (Postgr
 
 ## Peers
 
-- `@nestjs/common`, `@nestjs/core`: 9, 10, or 11
-- `@nestjs/swagger`: 7 to 11
-- `class-validator` 0.14, `class-transformer` 0.5
+Node 22.12 or newer (`@nestjs/swagger` 12 needs it).
+
+- `@nestjs/common`, `@nestjs/core`: 11 or 12
+- `@nestjs/swagger`: 11 or 12, matching Nest's major
+- `class-validator` 0.14 or 0.15, `class-transformer` 0.5
 - `@opentelemetry/api` 1.7 or newer (spans are emitted only when the app registers an OpenTelemetry SDK)
 - `reflect-metadata`, `rxjs`
 - `prom-client` 14 or 15, optional: only for `observability.metrics`

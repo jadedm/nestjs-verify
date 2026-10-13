@@ -49,5 +49,8 @@
   "devDependencies": {
     "@jadedm/nestjs-verify": "workspace:*",
     "twilio": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

@@ -12,7 +12,7 @@ a private runnable app wiring core, Twilio and Postgres together.
 
 ## Commands
 
-Development needs Node 20.19 or newer (vitest 4 and vite 7); the published packages still support Node 18, which CI's `packed` job checks.
+Development and the published packages need Node 22.12 or newer (`@nestjs/swagger` 12 and vite 7 need it); CI's `packed` job checks Node 22, 24 and 26, each against Nest 11 (`lowest`) and Nest 12 (`highest`) (#123).
 
 ```bash
 pnpm install --frozen-lockfile
