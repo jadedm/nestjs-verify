@@ -189,6 +189,12 @@ describe('VerifyService metrics and telemetry names (#7)', () => {
       new Type({ name, help: 'x', labelNames, registers: [shared] });
       expect(() => createMetricsRecorder({ enabled: true, registry: shared })).toThrow(`metric ${name} is already registered as a ${type}`);
     }
+    // prom-client's type omits the constructor's content-type argument.
+    const openMetrics = new (Registry as unknown as new (contentType: string) => Registry)(Registry.OPENMETRICS_CONTENT_TYPE);
+    new prom.Counter({ name: 'verify_starts_total', help: 'x', labelNames: ['channel'], enableExemplars: true, registers: [openMetrics] });
+    expect(() => createMetricsRecorder({ enabled: true, registry: openMetrics })).toThrow(
+      'metric verify_starts_total is already registered with exemplars enabled',
+    );
   });
 
   it('13b. labels expired and locked-out checks, and cooldown, IP-limit and abuse blocks, by channel', async () => {

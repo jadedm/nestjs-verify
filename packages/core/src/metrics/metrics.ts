@@ -111,6 +111,11 @@ class PromMetricsRecorder implements MetricsRecorder {
       if (found.type !== type) {
         throw new Error(`metric ${name} is already registered as a ${String(found.type)}, not a ${type}.`);
       }
+      // With exemplars on, prom-client 15 takes inc/observe arguments in
+      // another shape: a counter drops its labels, a histogram throws.
+      if (found.enableExemplars) {
+        throw new Error(`metric ${name} is already registered with exemplars enabled, which this recorder does not use.`);
+      }
       const same = [...(found.labelNames ?? [])].sort().join() === [...labelNames].sort().join();
       if (!same) {
         throw new Error(`metric ${name} is already registered with labels [${found.labelNames?.join(', ')}], not [${labelNames.join(', ')}].`);
