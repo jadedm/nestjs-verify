@@ -60,6 +60,28 @@ function recordFixture(sid, overrides = {}) {
   };
 }
 
+// An already-expired fixture can be deleted by Mongo's TTL monitor between
+// its write and the reservation (#109). A record that is really gone is
+// retried with a fresh sid; a not-found for a record that still exists is a
+// store bug and is returned as it came. SMOKE_SIMULATE_SWEEP=<n> deletes the
+// fixture before the first n tries of each case; SMOKE_SIMULATE_NOT_FOUND
+// answers not-found while the record exists.
+const SIMULATE_SWEEP = Number(process.env.SMOKE_SIMULATE_SWEEP ?? 0);
+const SIMULATE_NOT_FOUND = Boolean(process.env.SMOKE_SIMULATE_NOT_FOUND);
+const SWEEP_TRIES = 3;
+async function reserveExpired(verify, label, fixtureFor, reserve = (sid) => verify.reserveAttempt(sid)) {
+  for (let attempt = 1; attempt <= SWEEP_TRIES; attempt += 1) {
+    const fixture = fixtureFor(attempt === 1 ? '' : `_r${attempt}`);
+    await verify.create(fixture);
+    if (attempt <= SIMULATE_SWEEP) await verify.delete(fixture.sid);
+    const result = SIMULATE_NOT_FOUND ? { outcome: 'not-found' } : await reserve(fixture.sid);
+    const swept = result.outcome === 'not-found' && (await verify.get(fixture.sid)) === null;
+    if (!swept) return result;
+    console.log(`  retry: ${label}: ${fixture.sid} was swept before the reservation`);
+  }
+  assert(false, `${label}: the fixture was swept on all ${SWEEP_TRIES} tries`);
+}
+
 async function exerciseVerifyStore(name, verify) {
   console.log(`\n--- ${name} VerifyStore ---`);
   const v1 = recordFixture('vr_smoke_1');
@@ -98,23 +120,35 @@ async function exerciseVerifyStore(name, verify) {
   assert(after.attempts === 3 && after.status === 'pending', `reserveAttempt never changes the status, got ${after.attempts}/${after.status}`);
   assert((await verify.reserveAttempt('vr_missing')).outcome === 'not-found', 'reserve on unknown sid -> not-found');
   assert((await verify.reserveAttempt(v3.sid)).outcome === 'not-pending', 'reserve on a finished record -> not-pending');
-  const v5 = recordFixture(`vr_expired_${RUN}`, { attempts: 0, maxAttempts: 3, expiresAt: new Date(Date.now() - 1_000) });
-  await verify.create(v5);
-  const rExp = await verify.reserveAttempt(v5.sid);
+  const rExp = await reserveExpired(verify, 'reserve on an expired record', (suffix) =>
+    recordFixture(`vr_expired_${RUN}${suffix}`, { attempts: 0, maxAttempts: 3, expiresAt: new Date(Date.now() - 1_000) }),
+  );
   assert(rExp.outcome === 'expired' && rExp.record.attempts === 0, `reserve on an expired record -> expired, attempts untouched, got ${rExp.outcome}/${rExp.record?.attempts}`);
 
   // A refusal is named by the database clock that made it, whatever this
-  // process's clock says (#105). Fixtures are written before the skew.
+  // process's clock says (#105). Fixtures are written before the skew, and
+  // the clock is put back before a swept fixture is looked up.
   const realNow = Date.now();
-  const v6 = recordFixture(`vr_dbexpired_${RUN}`, { attempts: 0, maxAttempts: 3, expiresAt: new Date(realNow - 1_000) });
   const v7 = recordFixture(`vr_dbspent_${RUN}`, { attempts: 3, maxAttempts: 3, expiresAt: new Date(realNow + 60_000) });
-  await verify.create(v6);
   await verify.create(v7);
   const skew = (ms) => { Date.now = () => realNow + ms; };
   const realDateNow = Date.now;
   try {
-    skew(-3_600_000);
-    const behind = (await verify.reserveAttempt(v6.sid)).outcome;
+    const behind = (
+      await reserveExpired(
+        verify,
+        'expired by the database clock',
+        (suffix) => recordFixture(`vr_dbexpired_${RUN}${suffix}`, { attempts: 0, maxAttempts: 3, expiresAt: new Date(realNow - 1_000) }),
+        async (sid) => {
+          skew(-3_600_000);
+          try {
+            return await verify.reserveAttempt(sid);
+          } finally {
+            Date.now = realDateNow;
+          }
+        },
+      )
+    ).outcome;
     skew(3_600_000);
     const ahead = (await verify.reserveAttempt(v7.sid)).outcome;
     Date.now = realDateNow;
