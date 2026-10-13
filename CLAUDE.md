@@ -183,13 +183,18 @@ entries with `--core floor` install the lowest published core each adapter's ran
 adapter imports a value or a public type that core lacks (#76). They cannot see a dependency on newer
 core behaviour, or on a type used only inside an adapter; raising the bound for those is a review call. Because core,
 twilio, postgres and ses share one version line, a minor on one of those three without core would
-put core's next patch on that minor. The check refuses it while the ranges exclude that minor. The experimental
-`onlyUpdatePeerDependentsWhenOutOfRange` flag in `.changeset/config.json` keeps an adapter unbumped
-while core stays inside its range; without it every core minor or major bumps every adapter at major
-(patches never do). `pnpm check:release-plan` (CI build job) fails if the pending changesets carry any
+put core's next patch on that minor. The check refuses it while the ranges exclude that minor. Since
+Changesets 3 (#97) a release that stays inside an adapter's range leaves the adapter alone, and one that
+leaves it bumps the adapter at patch while `changeset version` rewrites its range to the new core's
+major: a patch that drops the old core. Changesets 2 needed the experimental
+`onlyUpdatePeerDependentsWhenOutOfRange` flag for the first half, and bumped at major instead. `"format":
+false` in `.changeset/config.json` stops Changesets 3 running Prettier, which it otherwise finds through
+any parent folder's config. `pnpm check:release-plan` (CI build job) fails on a config warning (Changesets
+3 drops a misspelt `linked` entry with only a warning), and if the pending changesets carry any
 package to a new major by accident, naming the ranges to widen, or move core to a new minor that an
 adapter's workspace range admits but the range of its version on npm does not, unless that adapter
-is released too (only then does it ask npm, and an unreachable registry fails it); probe changesets check the flag. The one accepted major
+is released too (only then does it ask npm, and an unreachable registry fails it); probe changesets check that a core release inside the ranges releases
+core alone. The one accepted major
 is a coordinated one: a `major` changeset for every public package, all to the same X.0.0, as 1.0 did.
 
 The `linked` group in `.changeset/config.json` lists only core, twilio, postgres and ses. Gupshup,

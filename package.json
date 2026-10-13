@@ -29,7 +29,7 @@
     "test:adapters:mongo-drivers": "docker compose -f scripts/docker-compose.smoke.yml up -d --wait mongo && pnpm build && node scripts/smoke-mongo-drivers.mjs; ec=$?; docker compose -f scripts/docker-compose.smoke.yml down -v; exit $ec"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.0",
+    "@changesets/cli": "^3.0.3",
     "@jadedm/nestjs-verify": "workspace:*",
     "@jadedm/nestjs-verify-gupshup": "workspace:*",
     "@jadedm/nestjs-verify-mongo": "workspace:*",
@@ -49,8 +49,7 @@
   "pnpm": {
     "overrides": {
       "js-yaml@>=5.0.0 <5.4.1": "^5.4.1",
-      "esbuild@>=0.27.0 <0.28.1": "^0.28.2",
-      "argparse@<2": "^2.0.1"
+      "esbuild@>=0.27.0 <0.28.1": "^0.28.2"
     }
   }
 }
