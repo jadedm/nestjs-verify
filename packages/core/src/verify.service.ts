@@ -266,7 +266,13 @@ export class VerifyService {
       expiresAt: new Date(now.getTime() + ttlSeconds * 1000),
     };
 
-    await this.releasingOnError(releaseClaim, () => this.options.stores.verify.create(record));
+    // A store that sets the deadline from its own clock returns it; one that
+    // keeps this process's deadline returns nothing (#108).
+    const ownDeadlineMs = record.expiresAt.getTime();
+    const deadline = await this.releasingOnError(releaseClaim, () => this.options.stores.verify.create(record, ttlSeconds));
+    const storeSetDeadline = deadline instanceof Date;
+    if (storeSetDeadline) record.expiresAt = deadline;
+    const createdAtMs = Date.now();
     const deleteRecord = () => this.tryCleanup('verification delete', () => this.options.stores.verify.delete(sid));
     // Removes this start's index entry only if it still holds this sid, so it
     // can never remove the entry of a newer verification (#9).
@@ -302,8 +308,14 @@ export class VerifyService {
     };
 
     await renewClaim(deleteRecord);
-    // The entry lives as long as the record, not a full TTL from now.
-    const indexTtlSeconds = Math.max(1, Math.ceil((record.expiresAt.getTime() - Date.now()) / 1000));
+    // The entry lives as long as the record, not a full TTL from now, measured
+    // on one clock (#108). A deadline the store set began inside create, so
+    // only the time since create returned counts; this process's own deadline
+    // also counts the time create took.
+    const indexTtlSeconds = Math.max(
+      1,
+      Math.ceil(storeSetDeadline ? ttlSeconds - (Date.now() - createdAtMs) / 1000 : (ownDeadlineMs - Date.now()) / 1000),
+    );
     // createdAt orders starts: a stalled write from an older start is refused
     // while this recipient has a newer live entry (#82).
     const [, indexErr] = await asyncHandler(this.recipientIndex.set(phone, sid, indexTtlSeconds, record.createdAt));
@@ -411,11 +423,9 @@ export class VerifyService {
       return { sid, state: 'canceled', attemptsRemaining: 0 };
     }
 
-    // This process's clock set expiresAt, so it judges the deadline here; a
-    // database store's reservation judges it again by the database clock, and
-    // the stricter of the two wins. Leaving it to the database alone would let
-    // a code live past its TTL whenever the database clock runs behind.
-    if (record.expiresAt.getTime() <= Date.now()) throw await this.expire(phone, sid, channel, params.ip, checkStart);
+    // Expiry is judged by the store's reservation below, on the clock that set
+    // the deadline (#108). Judging it here as well, on this process's clock,
+    // would end a code early or late by however far the two clocks disagree.
 
     // The attempt is counted before the code is compared. A reservation is
     // atomic and refused once maxAttempts are spent, so of any number of

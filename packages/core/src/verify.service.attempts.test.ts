@@ -139,20 +139,21 @@ describe('VerifyService, attempts counted before the code is compared', () => {
     vi.useRealTimers();
   });
 
-  it('refuses a code past the deadline this process set, even when the store would still reserve it (#105)', async () => {
+  it('leaves the deadline to the store: a code the store still reserves is checked, whatever this process\'s clock says (#108)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const service = build({ code: { fixedCode: CODE, ttlSeconds: 60 } });
     await service.start({ to: PHONE });
     const sid = (await stores.recipientIndex.get(PHONE))!;
-    // Database stores whose clock runs behind this process's would still find
-    // the index entry, read the record as pending and reserve.
+    // A database store set this deadline on its own clock, which runs behind
+    // this process's: it still finds the entry, reads the record as pending
+    // and reserves.
     const stored = (await stores.verify.get(sid))!;
     vi.spyOn(stores.recipientIndex, 'get').mockResolvedValue(sid);
     vi.spyOn(stores.verify, 'get').mockResolvedValue(stored);
     const reserve = vi.spyOn(stores.verify, 'reserveAttempt').mockResolvedValue({ record: stored, outcome: 'reserved' });
     vi.setSystemTime(Date.now() + 120_000);
-    expect(await outcome(service.check({ to: PHONE, code: CODE }))).toBe('CODE_EXPIRED');
-    expect(reserve).not.toHaveBeenCalled();
+    expect(await outcome(service.check({ to: PHONE, code: CODE }))).toBe('approved');
+    expect(reserve).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 

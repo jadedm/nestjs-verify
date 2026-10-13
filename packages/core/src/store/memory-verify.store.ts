@@ -14,7 +14,9 @@ import {
 export class MemoryVerifyStore implements VerifyStore {
   private readonly records = new Map<string, VerificationRecord>();
 
-  async create(v: VerificationRecord): Promise<void> {
+  // Keeps core's deadline, set on this process's clock, the clock its checks
+  // use; so it returns nothing (#108).
+  async create(v: VerificationRecord, _ttlSeconds?: number): Promise<Date | void> {
     this.records.set(v.sid, { ...v });
   }
 

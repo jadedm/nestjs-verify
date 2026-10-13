@@ -63,11 +63,23 @@ export class PostgresVerifyStore implements VerifyStore {
     this.table = opts.tableName ?? 'verifications';
   }
 
-  async create(v: VerificationRecord): Promise<void> {
-    await this.pool.query(
+  /**
+   * Given ttlSeconds, the deadline is NOW() + ttl, on the database clock that
+   * reserveAttempt judges it by, and is returned (#108). Without it (a core
+   * before 0.9.0) the record's own expiresAt is stored.
+   */
+  // Typed by the installed core's own declaration: before 0.9.0 it is
+  // Promise<void>, and an older core ignores the returned deadline (#108).
+  create(v: VerificationRecord, ttlSeconds?: number): ReturnType<VerifyStore['create']> {
+    return this.insert(v, ttlSeconds);
+  }
+
+  private async insert(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void> {
+    const { rows } = await this.pool.query<{ expires_at: Date }>(
       `INSERT INTO ${this.table}
         (sid, phone, channel, code_hash, salt, attempts, max_attempts, status, created_at, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE(NOW() + ($11::text || ' seconds')::interval, $10))
+       RETURNING expires_at`,
       [
         v.sid,
         // A core before 0.9.0 sets only `phone` (#8); the column keeps its name.
@@ -80,8 +92,13 @@ export class PostgresVerifyStore implements VerifyStore {
         v.status,
         v.createdAt,
         v.expiresAt,
+        ttlSeconds ?? null,
       ],
     );
+    // Without a TTL the record keeps core's deadline, so nothing is returned.
+    if (ttlSeconds === undefined) return;
+    // new Date: a host's pg type parser may return timestamptz as a string.
+    return new Date(rows[0].expires_at);
   }
 
   async get(sid: string): Promise<VerificationRecord | null> {

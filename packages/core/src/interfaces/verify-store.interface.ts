@@ -50,7 +50,14 @@ export interface ReserveResult {
  * compare more codes than maxAttempts allows.
  */
 export interface VerifyStore {
-  create(v: VerificationRecord): Promise<void>;
+  /**
+   * Stores a new record; an existing sid is an error. Given `ttlSeconds`, a
+   * store may set the deadline from its own clock, the clock its
+   * reserveAttempt judges it by, and return it; core then uses that deadline
+   * (#108). A store that keeps `v.expiresAt` returns nothing: a returned date
+   * always means the store set the deadline.
+   */
+  create(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void>;
   get(sid: string): Promise<VerificationRecord | null>;
   /**
    * In one atomic operation: if the record is pending, not past expiresAt,

@@ -68,8 +68,10 @@ export class MongoCooldownStore implements CooldownStore {
    * pipeline rewrites the document only when it is missing, expired, or held
    * by `holder`, and otherwise leaves it as it was; the document it returns
    * says who holds the key. (A filter on $$NOW would need $expr, which an
-   * upsert does not accept.) Two upserts racing to create the key can make
-   * one fail with a duplicate key, which means the other won. The holder goes
+   * upsert does not accept.) The filter is an equality on _id alone, so the
+   * server retries an upsert that loses a race to create the key (MongoDB
+   * 4.2+; 4,000 racing writes in a probe for #108 raised none); a duplicate
+   * key that still surfaces means the other won. The holder goes
    * through $literal so a value starting with "$" is not read as a field path.
    */
   async claim(key: string, seconds: number, holder: string): Promise<number> {
