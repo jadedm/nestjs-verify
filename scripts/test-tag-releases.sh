@@ -6,6 +6,8 @@
 # - npm replays a snapshot of the real registry, taken at the start, with
 #   core's checked-out version hidden from `versions` until call LIST_AT and
 #   not `latest` until call LATEST_AT (counted per run, across packages).
+#   AHEAD sets core's `latest` to a higher version than the checkout's (#113);
+#   AHEAD_LISTED also lists it, as a publish from a branch would.
 # - git and gh pass through to the real tools, but hide core's tag and
 #   release for that version, so the dry run sees it as freshly published.
 #   KEEP_TAG and KEEP_RELEASE leave the tag or the release visible.
@@ -58,6 +60,7 @@ const field = rest.filter((a) => !a.startsWith('--'));
 const stale = !rest.includes('--prefer-online') || (process.env.STALE_LISTING && field.join() === 'versions')
   || (process.env.STALE_LATEST && field.join() === 'dist-tags.latest');
 if (dir === 'core' && stale) { versions = versions.filter((v) => v !== version); tags.latest = versions.at(-1); }
+if (dir === 'core' && process.env.AHEAD) { tags.latest = process.env.AHEAD; if (process.env.AHEAD_LISTED) versions.push(process.env.AHEAD); }
 if (field.join() === 'versions,dist-tags') console.log(JSON.stringify({ versions, 'dist-tags': tags }));
 else if (field.join() === 'versions') console.log(JSON.stringify(versions));
 else if (field.join() === 'dist-tags.latest') console.log(tags.latest);
@@ -121,6 +124,17 @@ ARGS=--after-publish run "8 stale listing in the tagging pass: stops, nothing pl
   "did not list it" "would tag      ${tag}" LIST_AT=1 LATEST_AT=1 STALE_LISTING=1
 ARGS=--after-publish run "8b stale latest in the release pass: stops" 1 \
   "did not see it as latest" "would release  ${tag}" LIST_AT=1 LATEST_AT=1 STALE_LATEST=1
+ARGS=--after-publish run "10 latest already higher: no wait, tags it, no release" 0 \
+  "would tag      ${tag} at.*" "waiting|would release  ${tag}" LIST_AT=1 AHEAD=99.0.0
+ARGS=--after-publish run "10b and says why" 0 \
+  "${tag} is listed but npm's latest is already higher" "" LIST_AT=1 AHEAD=99.0.0
+ARGS=--after-publish run "10c latest higher, not listed yet: waits for the listing only" 0 \
+  "waiting for npm: ${tag} \(not listed\)" "latest is still" LIST_AT=6 AHEAD=99.0.0
+ARGS=--after-publish run "10d then tags it" 0 "would tag      ${tag} at" "would release  ${tag}" LIST_AT=6 AHEAD=99.0.0
+ARGS=--after-publish run "10e latest higher, never listed: exit 1, plans nothing" 1 \
+  "^- ${tag} \\(not listed\\)$" "would (tag|release)" LIST_AT=100000 AHEAD=99.0.0 TAG_RELEASES_WAIT_SECONDS=1
+ARGS=--after-publish run "10f branch publish (higher latest has no commit on main): fails at once" 1 \
+  "@jadedm/nestjs-verify@99.0.0 is on npm but no commit on origin/main" "waiting" LIST_AT=1 AHEAD=99.0.0 AHEAD_LISTED=1
 ARGS=--after-publish run "9 non-numeric poll interval: exit 2, no hang" 2 "must be numbers" "" TAG_RELEASES_POLL_MS=soon
 ARGS="--after-publsh" run "6 mistyped option: exit 2" 2 "unknown option" ""
 ARGS=--after-publish run "7 npm error: exits non-zero, no wait" 1 "E500" "waiting" STUB_NPM_FAIL=1

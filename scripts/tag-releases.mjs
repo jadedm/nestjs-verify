@@ -23,10 +23,13 @@
 // npm must list it and, unless it is a prerelease, show it as latest. Past
 // TAG_RELEASES_WAIT_SECONDS (default 600) it stops with nothing tagged and
 // names what npm still lacks. It then refuses to finish unless each of those
-// versions is tagged and released (a prerelease is only tagged).
+// versions is tagged and released (a prerelease is only tagged). A version
+// that npm's `latest` has already passed will never be latest, so it is
+// waited for until listed and then only tagged, like a prerelease (#113).
 //
 // Usage: node scripts/tag-releases.mjs [--dry-run] [--after-publish]
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -44,6 +47,8 @@ if (unknown.length > 0) {
 const dryRun = args.includes('--dry-run');
 const afterPublish = args.includes('--after-publish');
 const CORE = '@jadedm/nestjs-verify';
+const fromCli = createRequire(createRequire(import.meta.url).resolve('@changesets/cli/package.json'));
+const semver = fromCli('semver');
 
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts }).trim();
 const git = (...args) => sh('git', args);
@@ -89,13 +94,20 @@ const unfinished = ({ pkg }) => {
 };
 const awaited = afterPublish ? packages.filter(unfinished) : [];
 
+// Versions npm lists with a higher `latest`: tagged, never released.
+const passed = new Set();
 const notYetOnNpm = () =>
   awaited.flatMap(({ pkg }) => {
     const view = npmView(pkg.name);
     const versions = [view.versions].flat();
+    const latest = view['dist-tags']?.latest;
     if (!versions.includes(pkg.version)) return [`${pkg.name}@${pkg.version} (not listed)`];
-    if (pkg.version.includes('-') || view['dist-tags']?.latest === pkg.version) return [];
-    return [`${pkg.name}@${pkg.version} (latest is still ${view['dist-tags']?.latest})`];
+    if (pkg.version.includes('-') || latest === pkg.version) return [];
+    if (semver.valid(latest) && semver.gt(latest, pkg.version)) {
+      passed.add(`${pkg.name}@${pkg.version}`);
+      return [];
+    }
+    return [`${pkg.name}@${pkg.version} (latest is still ${latest})`];
   });
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -115,6 +127,7 @@ if (afterPublish) {
     sleep(pollMs);
     missing = notYetOnNpm();
   }
+  for (const tag of passed) console.log(`tag-releases: ${tag} is listed but npm's latest is already higher; tagging it without a release`);
   if (missing.length > 0) {
     console.error(
       `tag-releases: stopped after ${waitSeconds}s, nothing tagged or released; npm does not show:\n- ${missing.join('\n- ')}\n` +
@@ -182,7 +195,7 @@ for (const { pkg } of awaited) {
   const tag = `${pkg.name}@${pkg.version}`;
   if (!existingTags.has(tag) && !toTag.some((t) => t.tag === tag)) problems.push(`${tag} was on npm during the wait but the tagging pass did not list it; rerun`);
   const released = existingReleases.has(tag) || toRelease.some((r) => r.tag === tag);
-  if (!pkg.version.includes('-') && !released) problems.push(`${tag} was latest on npm during the wait but the release pass did not see it as latest; rerun`);
+  if (!pkg.version.includes('-') && !passed.has(tag) && !released) problems.push(`${tag} was latest on npm during the wait but the release pass did not see it as latest; rerun`);
 }
 
 if (problems.length > 0) {
