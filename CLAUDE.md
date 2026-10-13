@@ -150,7 +150,8 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
   `changeset-release/main` (`git commit --allow-empty` on a checkout of it, then push) so CI runs
   on a commit the bot did not author, then merge; do not merge with `--admin`. Closing and
   reopening the PR ran CI for 0.6.4 but left 0.6.5 BLOCKED with every check green. It also carries
-  Changesets' formatting-only rewrite of `store-redis/package.json`, which changes no version.
+  Changesets' formatting-only rewrite of `store-redis/package.json` under Changesets 2, which changes no
+  version; Changesets 3 edits package.json in place (#97).
 - After a publish, npm can take minutes to list the new versions and move `latest`; wait before
   reading a missing version as a failed publish. A rerun inside that window fails with E409
   "previously staged version": wait until `npm view <package>@<version> version` shows it, then
@@ -184,14 +185,15 @@ adapter imports a value or a public type that core lacks (#76). They cannot see 
 core behaviour, or on a type used only inside an adapter; raising the bound for those is a review call. Because core,
 twilio, postgres and ses share one version line, a minor on one of those three without core would
 put core's next patch on that minor. The check refuses it while the ranges exclude that minor. In
-Changesets 3 (#97) the planner leaves an adapter alone while a release stays inside its range, and a
-release that leaves it bumps the adapter at patch while `changeset version` rewrites its range to the
-new core's major: a patch that drops the old core (Changesets 2 bumped at major). The experimental
+Changesets 3 (#97) the planner leaves an adapter alone while a release stays inside its range. A
+release that leaves it bumps gupshup, mongo and redis at patch (twilio, postgres and ses follow the linked
+group's version) while `changeset version` rewrites the range to start at the new core: a release that
+drops the old core (Changesets 2 bumped at major). The experimental
 `onlyUpdatePeerDependentsWhenOutOfRange` flag in `.changeset/config.json` is still needed: `changeset
-version` reads it, and without it any core minor rewrites every adapter's range floor to that minor,
-released or not. `"format": false` stops Changesets 3 running Prettier, which it otherwise finds through
+version` reads it, and without it any core release, even a patch, rewrites every adapter's range floor
+to that version, released or not. `"format": false` stops Changesets 3 running Prettier, which it otherwise finds through
 any parent folder's config. `pnpm check:release-plan` (CI build job) fails without the flag, on a config
-warning (Changesets 3 drops a misspelt `linked` entry with only a warning), and if the pending changesets carry any
+warning (Changesets 3 drops a misspelt `linked` entry with only a warning) or on a top-level key it does not know (it drops those silently), and if the pending changesets carry any
 package to a new major by accident, naming the ranges to widen, or move core to a new minor that an
 adapter's workspace range admits but the range of its version on npm does not, unless that adapter
 is released too (only then does it ask npm, and an unreachable registry fails it); probe changesets check that a core release inside the ranges releases

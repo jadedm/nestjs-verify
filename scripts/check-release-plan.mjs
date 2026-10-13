@@ -7,9 +7,9 @@
 // Each adapter declares core as a peer, bounded to the core versions it works
 // with (`>=0.9.0 <2.0.0` since 1.0; before it, one 0.x minor at a time).
 // When a release leaves an adapter's peer range, Changesets 3 bumps that
-// adapter at patch and `changeset version` rewrites its range to the new
-// core's major (a patch that drops the old core, #97); Changesets 2 bumped it
-// at major instead (#10). The linked group carries core, twilio, postgres and
+// adapter at patch (or to the linked group's version) and `changeset version`
+// rewrites its range to start at the new core, a release that drops the old
+// core (#97); Changesets 2 bumped it at major instead (#10). The linked group carries core, twilio, postgres and
 // ses to one version. Either way the release has to be refused here.
 //
 // Two checks, both computed with the libraries @changesets/cli itself uses:
@@ -20,10 +20,11 @@
 //   release inside the ranges releases core alone under this config.
 // It also requires onlyUpdatePeerDependentsWhenOutOfRange. Changesets 3's
 // planner no longer needs it, but `changeset version` still reads it: without
-// it, any core minor rewrites every adapter's range floor to that minor,
-// released or not, dropping the older cores in a patch (#97).
+// it, any core release, even a patch, rewrites every adapter's range floor to
+// that version, released or not, dropping the older cores (#97).
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -44,7 +45,14 @@ const packages = await getPackages(root);
 // Changesets 3 reports some config mistakes as warnings and drops the bad
 // entry (a misspelt name in `linked` silently unlinks it), so both fail here.
 const { config, errors: configErrors = [], warnings: configWarnings = [] } = await readConfig(root, packages);
-const configProblems = [...configErrors, ...configWarnings].map((e) => e?.message ?? String(e));
+// Unknown top-level keys are dropped without a warning (a misspelt "format"
+// falls back to running a formatter), so compare against what was read.
+const writtenConfig = JSON.parse(readFileSync(path.join(root, '.changeset', 'config.json'), 'utf8'));
+const unknownKeys = config ? Object.keys(writtenConfig).filter((k) => k !== '$schema' && !(k in config)) : [];
+const configProblems = [
+  ...[...configErrors, ...configWarnings].map((e) => e?.message ?? String(e)),
+  ...unknownKeys.map((k) => `unknown key "${k}"`),
+];
 if (configProblems.length > 0) {
   console.error(`check-release-plan: .changeset/config.json:\n- ${configProblems.join('\n- ')}`);
   process.exit(1);
