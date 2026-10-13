@@ -99,4 +99,11 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE verify_cooldowns ADD COLUMN IF NOT EXISTS holder TEXT;
     `,
   },
+  {
+    version: 4,
+    description: 'recipient index created_at, so an older start cannot replace a newer entry (#82)',
+    sql: `
+      ALTER TABLE verify_phone_index ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+    `,
+  },
 ];

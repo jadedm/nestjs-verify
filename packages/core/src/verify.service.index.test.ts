@@ -64,7 +64,7 @@ describe('VerifyService, index entries removed only while they hold this sid (#9
     expect(await stores.recipientIndex.get(PHONE)).toBeNull();
   });
 
-  it('leaves no entry pointing at its deleted record after losing the claim during the index write (case 2)', async () => {
+  it('keeps the winner\'s entry when the loser\'s stalled index write lands after it (case 2, #82 case 1)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const sms = provider();
     const service = build(sms, { attempts: { cooldownSeconds: 1 }, delivery: { attemptTimeoutMs: 1000, totalTimeoutMs: 1000 } });
@@ -72,21 +72,24 @@ describe('VerifyService, index entries removed only while they hold this sid (#9
     let open!: () => void;
     const gate = new Promise<void>((r) => (open = r));
     let stalledSid = '';
-    vi.spyOn(stores.recipientIndex, 'set').mockImplementationOnce(async (phone, sid, ttl) => {
+    vi.spyOn(stores.recipientIndex, 'set').mockImplementationOnce(async (phone, sid, ttl, createdAt) => {
       stalledSid = sid;
       await gate;
-      return set(phone, sid, ttl);
+      return set(phone, sid, ttl, createdAt);
     });
     const first = outcome(service.start({ to: PHONE }));
     await vi.waitFor(() => expect(stalledSid).not.toBe(''));
     vi.setSystemTime(Date.now() + 60_000);
     expect(await outcome(service.start({ to: PHONE }))).toBe('ok');
+    const winner = await stores.recipientIndex.get(PHONE);
     open();
     expect(await first).toBe(VerifyErrorCode.CooldownActive);
     expect(sms.send).toHaveBeenCalledTimes(1);
-    // The stalled write replaced the winner's entry (#82); the loser then
-    // removed it, so nothing points at the loser's deleted record.
-    expect(await stores.recipientIndex.get(PHONE)).not.toBe(stalledSid);
+    // The stalled write is refused: the winner's entry, created later, stays
+    // (#82), and the winner's code still checks.
+    expect(await stores.recipientIndex.get(PHONE)).toBe(winner);
+    expect(winner).not.toBe(stalledSid);
+    expect((await service.check({ to: PHONE, code: CODE })).state).toBe('approved');
   });
 
   it('removes its own entry when the second renewal errors (case 3)', async () => {

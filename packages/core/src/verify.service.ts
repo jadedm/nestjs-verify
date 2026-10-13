@@ -282,8 +282,9 @@ export class VerifyService {
     // the index entry of the start that took it; and again right before the
     // send, so it cannot send a second code. Losing it means another start
     // holds it: this one removes its own record, and its index entry if the
-    // index still holds it, and answers 429. (A stalled index write that
-    // landed over the winner's entry has already replaced it; #82.)
+    // index still holds it, and answers 429. A stalled index write cannot
+    // land over the winner's entry: the store refuses an older createdAt
+    // while a newer entry is live (#82).
     // Returns when the renewed claim expires.
     const renewClaim = async (cleanupOnError: () => Promise<void>): Promise<number> => {
       const renewedAt = Date.now();
@@ -303,7 +304,9 @@ export class VerifyService {
     await renewClaim(deleteRecord);
     // The entry lives as long as the record, not a full TTL from now.
     const indexTtlSeconds = Math.max(1, Math.ceil((record.expiresAt.getTime() - Date.now()) / 1000));
-    const [, indexErr] = await asyncHandler(this.recipientIndex.set(phone, sid, indexTtlSeconds));
+    // createdAt orders starts: a stalled write from an older start is refused
+    // while this recipient has a newer live entry (#82).
+    const [, indexErr] = await asyncHandler(this.recipientIndex.set(phone, sid, indexTtlSeconds, record.createdAt));
     if (indexErr) {
       // The write may have been saved before it reported the error.
       await deleteOwnRecordAndIndex();

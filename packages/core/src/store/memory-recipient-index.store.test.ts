@@ -46,3 +46,49 @@ describe('MemoryRecipientIndexStore.deleteIfMatches (#9)', () => {
     expect(await store.get('+1')).toBeNull();
   });
 });
+
+describe('MemoryRecipientIndexStore.set with createdAt (#82)', () => {
+  const at = (ms: number) => new Date(1_700_000_000_000 + ms);
+
+  it('2. a newer createdAt replaces a live entry', async () => {
+    const store = new MemoryRecipientIndexStore();
+    await store.set('+91999', 'vr_old', 60, at(0));
+    await store.set('+91999', 'vr_new', 60, at(1000));
+    expect(await store.get('+91999')).toBe('vr_new');
+  });
+
+  it('3. an older createdAt is refused while the entry is live', async () => {
+    const store = new MemoryRecipientIndexStore();
+    await store.set('+91999', 'vr_new', 60, at(1000));
+    await store.set('+91999', 'vr_old', 60, at(0));
+    expect(await store.get('+91999')).toBe('vr_new');
+  });
+
+  it('4. an older createdAt replaces an expired entry', async () => {
+    const store = new MemoryRecipientIndexStore();
+    await store.set('+91999', 'vr_new', 0, at(1000));
+    await store.set('+91999', 'vr_old', 60, at(0));
+    expect(await store.get('+91999')).toBe('vr_old');
+  });
+
+  it('5. an entry written without createdAt is replaced by any write', async () => {
+    const store = new MemoryRecipientIndexStore();
+    await store.set('+91999', 'vr_legacy', 60);
+    await store.set('+91999', 'vr_old', 60, at(0));
+    expect(await store.get('+91999')).toBe('vr_old');
+  });
+
+  it('6. a write without createdAt replaces a live entry, as before 0.9.0', async () => {
+    const store = new MemoryRecipientIndexStore();
+    await store.set('+91999', 'vr_new', 60, at(1000));
+    await store.set('+91999', 'vr_legacy', 60);
+    expect(await store.get('+91999')).toBe('vr_legacy');
+  });
+
+  it('7. an equal createdAt replaces', async () => {
+    const store = new MemoryRecipientIndexStore();
+    await store.set('+91999', 'vr_a', 60, at(0));
+    await store.set('+91999', 'vr_b', 60, at(0));
+    expect(await store.get('+91999')).toBe('vr_b');
+  });
+});
