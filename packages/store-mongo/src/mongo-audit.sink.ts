@@ -10,7 +10,7 @@ export interface MongoAuditSinkOptions {
 }
 
 // The redacted recipient is stored as `phoneRedacted`, its name before 0.9.0 (#8).
-interface AuditDoc extends Omit<AuditEvent, 'ts' | 'recipientRedacted' | 'phoneRedacted'> {
+interface AuditDoc extends Omit<AuditEvent, 'ts' | 'recipientRedacted'> {
   phoneRedacted: string;
   ts: Date;
 }
@@ -38,12 +38,10 @@ export class MongoAuditSink implements AuditSink {
   }
 
   async record(event: AuditEvent): Promise<void> {
-    // One field, `phoneRedacted`, as before 0.9.0: core 0.9 sets both names
-    // and a core before it sets only the old one (#8).
-    const { recipientRedacted, phoneRedacted, ...rest } = event;
+    const { recipientRedacted, ...rest } = event;
     await this.col.insertOne({
       ...rest,
-      phoneRedacted: recipientRedacted ?? phoneRedacted,
+      phoneRedacted: recipientRedacted,
       ts: event.ts,
     });
   }

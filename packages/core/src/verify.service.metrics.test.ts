@@ -62,7 +62,7 @@ describe('VerifyService metrics and telemetry names (#7)', () => {
     expect(await valueOf('verify_starts_total', { channel: 'email' })).toBe(1);
   });
 
-  it('2. times every send under send_duration_seconds by channel, and only SMS under the old histogram', async () => {
+  it('2. times every send under send_duration_seconds by channel', async () => {
     const service = build();
     await service.start({ to: EMAIL, channel: 'email' });
     await service.start({ to: PHONE });
@@ -70,7 +70,6 @@ describe('VerifyService metrics and telemetry names (#7)', () => {
       valueOf('verify_send_duration_seconds', labels, registry, 'verify_send_duration_seconds_count');
     expect(await count({ channel: 'email', provider: 'mock-email', outcome: 'success' })).toBe(1);
     expect(await count({ channel: 'sms', outcome: 'success' })).toBe(1);
-    expect(await valueOf('verify_sms_send_duration_seconds', {}, registry, 'verify_sms_send_duration_seconds_count')).toBe(1);
   });
 
   it('3. a recipient over its limit is counted as recipient_rate_limit, and audited so', async () => {
@@ -96,16 +95,15 @@ describe('VerifyService metrics and telemetry names (#7)', () => {
     expect(await count('sms')).toBe(1);
   });
 
-  it('5. advances the new rate-limit counter by channel and the old one with it', async () => {
+  it('5. advances the rate-limit counter by channel', async () => {
     const service = build();
     await service.start({ to: PHONE });
     await service.start({ to: EMAIL, channel: 'email' });
     expect(await valueOf('verify_recipient_rate_limit_hits_total', { channel: 'sms' })).toBe(1);
     expect(await valueOf('verify_recipient_rate_limit_hits_total', { channel: 'email' })).toBe(1);
-    expect(await valueOf('verify_phone_rate_limit_hits_total', {})).toBe(2);
   });
 
-  it('6 and 12. sets both recipient attribute names on spans, and the channel on the check span', async () => {
+  it('6 and 12. sets the recipient attribute on spans, and the channel on the check span', async () => {
     const spans: Array<{ name: string; attributes: Record<string, unknown> }> = [];
     vi.spyOn(trace, 'getTracer').mockReturnValue({
       startActiveSpan: (name: string, fn: (span: unknown) => unknown) => {
@@ -126,27 +124,29 @@ describe('VerifyService metrics and telemetry names (#7)', () => {
     for (const name of ['verify.start', 'verify.send_code', 'verify.check']) {
       const span = spans.find((s) => s.name === name)!;
       expect(span.attributes['verify.recipient_redacted']).toBe('s***@example.com');
-      expect(span.attributes['verify.phone_redacted']).toBe('s***@example.com');
+      expect(span.attributes).not.toHaveProperty('verify.phone_redacted');
     }
     expect(spans.find((s) => s.name === 'verify.check')!.attributes['verify.channel']).toBe('email');
   });
 
-  it('7. a velocity block audits distinctRecipients, and distinctPhones with the same value', async () => {
+  it('7. a velocity block audits distinctRecipients', async () => {
     const service = build({ abuse: { maxDistinctRecipientsPerIp: 1 } });
     await service.start({ to: PHONE, ip: IP });
     await service.start({ to: EMAIL, channel: 'email', ip: IP }).catch(() => undefined);
     const event = stores.audit.events.find((e) => e.type === 'abuse_detected')!;
-    expect(event.meta).toEqual({ distinctRecipients: 1, distinctPhones: 1 });
+    expect(event.meta).toEqual({ distinctRecipients: 1 });
   });
 
-  it('8. LoggerAuditSink logs the recipient under both keys', async () => {
+  it('8. LoggerAuditSink logs the recipient under its key alone', async () => {
     const lines: unknown[] = [];
     vi.spyOn(Logger.prototype, 'log').mockImplementation((...args: unknown[]) => {
       lines.push(args);
     });
     await new LoggerAuditSink().record({ type: 'verification_started', recipientRedacted: 's***@example.com', channel: 'email', ts: new Date() });
     const payload = (lines.flat() as unknown[]).find((a) => typeof a === 'string' && a.startsWith('{')) as string;
-    expect(JSON.parse(payload)).toMatchObject({ recipient: 's***@example.com', phone: 's***@example.com' });
+    const logged = JSON.parse(payload);
+    expect(logged.recipient).toBe('s***@example.com');
+    expect(logged).not.toHaveProperty('phone');
   });
 
   it('9. disabled metrics record nothing and do not fail', async () => {
@@ -229,13 +229,12 @@ describe('VerifyService metrics and telemetry names (#7)', () => {
     expect((await values('verify_starts_blocked_total')).some((v) => v.labels.channel === 'unknown')).toBe(false);
   });
 
-  it('14. the deprecated recorder methods still record, through the new ones', async () => {
-    const recorder = createMetricsRecorder({ enabled: true, registry });
-    recorder.phoneRateLimitHits();
-    recorder.smsSendDuration('p', 'success', 0.1);
-    expect(await valueOf('verify_recipient_rate_limit_hits_total', { channel: 'unknown' })).toBe(1);
-    expect(await valueOf('verify_phone_rate_limit_hits_total', {})).toBe(1);
-    expect(await valueOf('verify_send_duration_seconds', { channel: 'sms', provider: 'p' }, registry, 'verify_send_duration_seconds_count')).toBe(1);
-    expect(await valueOf('verify_sms_send_duration_seconds', { provider: 'p' }, registry, 'verify_sms_send_duration_seconds_count')).toBe(1);
+  it('14. registers none of the series removed in 1.0 (#124)', async () => {
+    const service = build();
+    await service.start({ to: PHONE });
+    const names = (await registry.getMetricsAsJSON()).map((m) => m.name);
+    expect(names).toContain('verify_send_duration_seconds');
+    expect(names).not.toContain('verify_sms_send_duration_seconds');
+    expect(names).not.toContain('verify_phone_rate_limit_hits_total');
   });
 });

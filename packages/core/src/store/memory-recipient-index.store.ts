@@ -42,8 +42,3 @@ export class MemoryRecipientIndexStore implements RecipientIndexStore {
     this.entries.delete(recipient);
   }
 }
-
-/** @deprecated Renamed to `MemoryRecipientIndexStore` in 0.9.0; removed in 1.0. */
-export const MemoryPhoneIndexStore = MemoryRecipientIndexStore;
-/** @deprecated Renamed to `MemoryRecipientIndexStore` in 0.9.0; removed in 1.0. */
-export type MemoryPhoneIndexStore = MemoryRecipientIndexStore;

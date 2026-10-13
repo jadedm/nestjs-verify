@@ -1,5 +1,5 @@
 import type {
-  IncrementResult,
+  ReserveResult,
   VerificationRecord,
   VerificationStatus,
   VerifyStore,
@@ -26,19 +26,12 @@ interface Row {
   expires_at: Date;
 }
 
-// The shape of core's ReserveResult, written out so this store's published
-// types do not need a core that exports it (its peer range starts at 0.6.8).
-type ReserveOutcome = {
-  record: VerificationRecord | null;
-  outcome: 'reserved' | 'exhausted' | 'expired' | 'not-pending' | 'not-found';
-};
-
 // Why a reservation that matched nothing was refused. The decision was made
 // atomically by the update; this only names it from a later read, on the
 // same database clock rather than this process's, which may disagree with
 // it (#105). The read is a moment later than the update, so a record spent
 // just before its deadline can be named expired; that fails closed.
-const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveOutcome['outcome'] => {
+const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveResult['outcome'] => {
   if (r.status !== 'pending') return 'not-pending';
   if (expired) return 'expired';
   return 'exhausted';
@@ -65,16 +58,10 @@ export class PostgresVerifyStore implements VerifyStore {
 
   /**
    * Given ttlSeconds, the deadline is NOW() + ttl, on the database clock that
-   * reserveAttempt judges it by, and is returned (#108). Without it (a core
-   * before 0.9.0) the record's own expiresAt is stored.
+   * reserveAttempt judges it by, and is returned (#108). Without it the
+   * record's own expiresAt is stored and nothing is returned.
    */
-  // Typed by the installed core's own declaration: before 0.9.0 it is
-  // Promise<void>, and an older core ignores the returned deadline (#108).
-  create(v: VerificationRecord, ttlSeconds?: number): ReturnType<VerifyStore['create']> {
-    return this.insert(v, ttlSeconds);
-  }
-
-  private async insert(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void> {
+  async create(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void> {
     const { rows } = await this.pool.query<{ expires_at: Date }>(
       `INSERT INTO ${this.table}
         (sid, phone, channel, code_hash, salt, attempts, max_attempts, status, created_at, expires_at)
@@ -82,8 +69,8 @@ export class PostgresVerifyStore implements VerifyStore {
        RETURNING expires_at`,
       [
         v.sid,
-        // A core before 0.9.0 sets only `phone` (#8); the column keeps its name.
-        v.recipient ?? v.phone,
+        // The column keeps its pre-0.9.0 name (#8).
+        v.recipient,
         v.channel,
         v.codeHash,
         v.salt,
@@ -114,7 +101,7 @@ export class PostgresVerifyStore implements VerifyStore {
    * maximum, so concurrent reservations take turns on the row lock and at most
    * max_attempts of them succeed. The status is never changed here.
    */
-  async reserveAttempt(sid: string): Promise<ReserveOutcome> {
+  async reserveAttempt(sid: string): Promise<ReserveResult> {
     const { rows } = await this.pool.query<Row>(
       `UPDATE ${this.table}
        SET attempts = attempts + 1
@@ -131,35 +118,6 @@ export class PostgresVerifyStore implements VerifyStore {
     const { db_expired: expired, ...row } = found[0];
     const existing = this.fromRow(row);
     return { record: existing, outcome: refusedOutcome(existing, expired) };
-  }
-
-  /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
-  async incrementAttempts(sid: string): Promise<IncrementResult> {
-    // Atomic: increment AND conditionally flip status to 'canceled' if the
-    // new count reaches max_attempts. Single round-trip, RETURNING the new
-    // row so the caller knows the outcome without re-reading.
-    const { rows } = await this.pool.query<Row>(
-      `UPDATE ${this.table}
-       SET attempts = attempts + 1,
-           status = CASE
-             WHEN attempts + 1 >= max_attempts THEN 'canceled'
-             ELSE status
-           END
-       WHERE sid = $1 AND status = 'pending'
-       RETURNING *`,
-      [sid],
-    );
-    if (rows[0]) {
-      const record = this.fromRow(rows[0]);
-      return {
-        record,
-        outcome: record.status === 'canceled' ? 'locked-out' : 'incremented',
-      };
-    }
-    // The UPDATE didn't match — either no such sid, or status != 'pending'.
-    const existing = await this.get(sid);
-    if (!existing) return { record: null, outcome: 'not-found' };
-    return { record: existing, outcome: 'not-pending' };
   }
 
   async markStatus(
@@ -182,8 +140,6 @@ export class PostgresVerifyStore implements VerifyStore {
     return {
       sid: r.sid,
       recipient: r.phone,
-      // For a core before 0.9.0, which reads `phone` (#8).
-      phone: r.phone,
       channel: r.channel as VerificationRecord['channel'],
       codeHash: r.code_hash,
       salt: r.salt,

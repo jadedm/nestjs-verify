@@ -1,4 +1,4 @@
-import type { PhoneIndexStore } from '@jadedm/nestjs-verify';
+import type { RecipientIndexStore } from '@jadedm/nestjs-verify';
 import { Pool, PoolConfig } from 'pg';
 
 export interface PostgresRecipientIndexStoreOptions {
@@ -8,9 +8,7 @@ export interface PostgresRecipientIndexStoreOptions {
   tableName?: string;
 }
 
-// Implements the pre-0.9.0 type name: the core range this adapter supports
-// starts before `RecipientIndexStore` existed (#8).
-export class PostgresRecipientIndexStore implements PhoneIndexStore {
+export class PostgresRecipientIndexStore implements RecipientIndexStore {
   private readonly pool: Pool;
   private readonly table: string;
 
@@ -68,10 +66,3 @@ export class PostgresRecipientIndexStore implements PhoneIndexStore {
     await this.pool.query(`DELETE FROM ${this.table} WHERE phone = $1 AND sid = $2`, [phone, sid]);
   }
 }
-
-/** @deprecated Renamed to `PostgresRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
-export const PostgresPhoneIndexStore = PostgresRecipientIndexStore;
-/** @deprecated Renamed to `PostgresRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
-export type PostgresPhoneIndexStore = PostgresRecipientIndexStore;
-/** @deprecated Renamed to `PostgresRecipientIndexStoreOptions` in 0.9.0 (#8); removed in 1.0. */
-export type PostgresPhoneIndexStoreOptions = PostgresRecipientIndexStoreOptions;

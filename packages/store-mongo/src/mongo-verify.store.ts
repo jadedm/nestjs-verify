@@ -1,5 +1,5 @@
 import type {
-  IncrementResult,
+  ReserveResult,
   VerificationRecord,
   VerificationStatus,
   VerifyStore,
@@ -36,19 +36,12 @@ interface VerificationDoc {
   expiresAt: Date;
 }
 
-// The shape of core's ReserveResult, written out so this store's published
-// types do not need a core that exports it (its peer range starts at 0.6.8).
-type ReserveOutcome = {
-  record: VerificationRecord | null;
-  outcome: 'reserved' | 'exhausted' | 'expired' | 'not-pending' | 'not-found';
-};
-
 // Why a reservation that matched nothing was refused. The decision was made
 // atomically by the update; this only names it from a later read, on the
 // same database clock rather than this process's, which may disagree with
 // it (#105). The read is a moment later than the update, so a record spent
 // just before its deadline can be named expired; that fails closed.
-const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveOutcome['outcome'] => {
+const refusedOutcome = (r: VerificationRecord, expired: boolean): ReserveResult['outcome'] => {
   if (r.status !== 'pending') return 'not-pending';
   if (expired) return 'expired';
   return 'exhausted';
@@ -88,18 +81,12 @@ export class MongoVerifyStore implements VerifyStore {
   /**
    * Given ttlSeconds, the deadline is $$NOW + ttl, on the server clock that
    * reserveAttempt and the TTL index judge it by, and is returned (#108).
-   * Without it (a core before 0.9.0) the record's own expiresAt is stored.
+   * Without it the record's own expiresAt is stored and nothing is returned.
    */
-  // Typed by the installed core's own declaration: before 0.9.0 it is
-  // Promise<void>, and an older core ignores the returned deadline (#108).
-  create(v: VerificationRecord, ttlSeconds?: number): ReturnType<VerifyStore['create']> {
-    return this.insert(v, ttlSeconds);
-  }
-
-  private async insert(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void> {
-    // A core before 0.9.0 sets only `phone` (#8); the document keeps that field.
-    const { sid, recipient, phone, ...rest } = v;
-    const doc = { ...rest, phone: (recipient ?? phone)! };
+  async create(v: VerificationRecord, ttlSeconds?: number): Promise<Date | void> {
+    // The document keeps the field's pre-0.9.0 name, `phone` (#8).
+    const { sid, recipient, ...rest } = v;
+    const doc = { ...rest, phone: recipient };
     if (ttlSeconds === undefined) {
       // The record keeps core's deadline, so nothing is returned.
       await this.col.insertOne({ _id: sid, ...doc });
@@ -129,7 +116,7 @@ export class MongoVerifyStore implements VerifyStore {
    * reservations succeed. The status is never changed here. The result is
    * read as { value } under drivers 5 and 6 (#79).
    */
-  async reserveAttempt(sid: string): Promise<ReserveOutcome> {
+  async reserveAttempt(sid: string): Promise<ReserveResult> {
     const result = await this.col.findOneAndUpdate(
       {
         _id: sid,
@@ -150,47 +137,6 @@ export class MongoVerifyStore implements VerifyStore {
     const { dbExpired: expired, ...doc } = existing;
     const record = this.toRecord(doc);
     return { record, outcome: refusedOutcome(record, expired) };
-  }
-
-  /** @deprecated The service uses `reserveAttempt`; kept for direct callers. */
-  async incrementAttempts(sid: string): Promise<IncrementResult> {
-    // Atomic: increment AND conditionally flip status to 'canceled' if the
-    // new count reaches max_attempts. Single round-trip via aggregation-
-    // pipeline update (Mongo 4.2+), returning the post-update document.
-    // includeResultMetadata gives the same { value } shape under drivers 5
-    // and 6; driver 5 returns it by default and 6 returns the bare document
-    // (#79).
-    const result = await this.col.findOneAndUpdate(
-      { _id: sid, status: 'pending' },
-      [
-        { $set: { attempts: { $add: ['$attempts', 1] } } },
-        {
-          $set: {
-            status: {
-              $cond: [
-                { $gte: ['$attempts', '$maxAttempts'] },
-                'canceled',
-                '$status',
-              ],
-            },
-          },
-        },
-      ],
-      { returnDocument: 'after', includeResultMetadata: true },
-    );
-    const updated = result.value;
-
-    if (updated) {
-      const record = this.toRecord(updated);
-      return {
-        record,
-        outcome: record.status === 'canceled' ? 'locked-out' : 'incremented',
-      };
-    }
-    // No match — either sid doesn't exist or status was no longer 'pending'.
-    const existing = await this.col.findOne({ _id: sid });
-    if (!existing) return { record: null, outcome: 'not-found' };
-    return { record: this.toRecord(existing), outcome: 'not-pending' };
   }
 
   async markStatus(
@@ -214,8 +160,7 @@ export class MongoVerifyStore implements VerifyStore {
   }
 
   private toRecord(doc: VerificationDoc): VerificationRecord {
-    const { _id, ...rest } = doc;
-    // Both names: `recipient` for core 0.9.0 and later, `phone` for earlier (#8).
-    return { sid: _id, ...rest, recipient: doc.phone };
+    const { _id, phone, ...rest } = doc;
+    return { sid: _id, ...rest, recipient: phone };
   }
 }

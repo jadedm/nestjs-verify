@@ -13,23 +13,6 @@ export interface RateLimitPolicy {
   windowSeconds: number;
 }
 
-/**
- * The recipient index store, under its 0.9.0 name or the old one (#8). At
- * least one is required. When both are given as different objects,
- * `phoneIndex` is used and a warning is logged. `phoneIndex` is removed in 1.0.
- */
-export type RecipientIndexOption =
-  | {
-      recipientIndex: RecipientIndexStore;
-      /** @deprecated Renamed to `recipientIndex` in 0.9.0; removed in 1.0. */
-      phoneIndex?: RecipientIndexStore;
-    }
-  | {
-      recipientIndex?: RecipientIndexStore;
-      /** @deprecated Renamed to `recipientIndex` in 0.9.0; removed in 1.0. */
-      phoneIndex: RecipientIndexStore;
-    };
-
 export interface VerifyModuleOptions {
   /** SMS delivery. At least one of `sms` or `email` is required. */
   sms?: {
@@ -55,13 +38,14 @@ export interface VerifyModuleOptions {
     abuse?: AbuseStore;
     rateLimit: RateLimitStore;
     cooldown: CooldownStore;
+    recipientIndex: RecipientIndexStore;
     /**
      * Optional. When provided, lifecycle events for every verification
      * (started, dispatched, approved, canceled, rate-limited, abuse-detected)
      * are emitted to this sink.
      */
     audit?: AuditSink;
-  } & RecipientIndexOption;
+  };
   observability?: {
     tracing?: {
       /**
@@ -130,15 +114,11 @@ export interface VerifyModuleOptions {
   rateLimit?: {
     /** Sends per recipient (phone or email) in the window. */
     perRecipient?: RateLimitPolicy;
-    /** @deprecated Renamed to `perRecipient` in 0.9.0; removed in 1.0. */
-    perPhone?: RateLimitPolicy;
     perIp?: RateLimitPolicy;
   };
   abuse?: {
     /** Max distinct recipients (phones or emails) a single IP may verify in the window. */
     maxDistinctRecipientsPerIp?: number;
-    /** @deprecated Renamed to `maxDistinctRecipientsPerIp` in 0.9.0; removed in 1.0. */
-    maxDistinctPhonesPerIp?: number;
     velocityWindowSeconds?: number;
   };
   /**

@@ -24,8 +24,6 @@ export class LoggerAuditSink implements AuditSink {
       type: event.type,
       sid: event.sid,
       recipient: event.recipientRedacted,
-      // The pre-0.9.0 key, until 1.0 (#7).
-      phone: event.recipientRedacted,
       ip: event.ip,
       channel: event.channel,
       provider: event.provider,

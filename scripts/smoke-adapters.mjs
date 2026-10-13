@@ -68,13 +68,7 @@ async function exerciseVerifyStore(name, verify) {
   assert(got?.sid === v1.sid && got?.status === 'pending', 'create + get round-trips');
   assert(got?.attempts === 0, 'attempts default 0');
   assert((await verify.get('vr_missing')) === null, 'get returns null for missing sid');
-  assert(got?.recipient === '+14155552671' && got?.phone === '+14155552671', 'get returns the recipient under both names (#8)');
-
-  // A core before 0.9.0 writes `phone` only, a core from 0.9.0 `recipient` (#8).
-  const { recipient: _r, ...oldStyle } = recordFixture(`vr_oldcore_${RUN}`);
-  await verify.create({ ...oldStyle, phone: '+14155550100' });
-  const gotOld = await verify.get(oldStyle.sid);
-  assert(gotOld?.recipient === '+14155550100' && gotOld?.phone === '+14155550100', 'a record written with phone only reads back under both names');
+  assert(got?.recipient === '+14155552671' && !('phone' in got), 'get returns the recipient under its 1.0 name alone (#124)');
 
   // Given a TTL, the store sets the deadline on its own clock and returns it,
   // and an existing sid is still refused (#108).
@@ -86,26 +80,10 @@ async function exerciseVerifyStore(name, verify) {
   const dup = await verify.create(withTtl, 90).then(() => 'stored', (e) => e?.code ?? e?.message);
   assert(dup !== 'stored', `create with an existing sid is refused, got ${dup}`);
 
-  const r1 = await verify.incrementAttempts(v1.sid);
-  assert(r1.outcome === 'incremented', 'first increment -> incremented');
-  assert(r1.record?.attempts === 1, 'attempts now 1');
-
-  const rNF = await verify.incrementAttempts('vr_missing');
-  assert(rNF.outcome === 'not-found', 'increment on missing -> not-found');
-
-  const v2 = recordFixture('vr_smoke_2', { attempts: 2, maxAttempts: 3 });
-  await verify.create(v2);
-  const r2 = await verify.incrementAttempts(v2.sid);
-  assert(r2.outcome === 'locked-out', 'increment at max -> locked-out');
-  assert(r2.record?.status === 'canceled', 'status flipped to canceled atomically');
-
   const v3 = recordFixture('vr_smoke_3');
   await verify.create(v3);
   assert((await verify.markStatus(v3.sid, 'approved')) === true, 'markStatus pending -> approved');
   assert((await verify.markStatus(v3.sid, 'canceled')) === false, 'second markStatus returns false');
-
-  const rNP = await verify.incrementAttempts(v3.sid);
-  assert(rNP.outcome === 'not-pending', 'increment on terminal -> not-pending');
 
   await verify.delete(v1.sid);
   assert((await verify.get(v1.sid)) === null, 'delete works');
@@ -149,17 +127,14 @@ async function exerciseVerifyStore(name, verify) {
 
 async function exerciseAbuseStore(name, abuse) {
   console.log(`\n--- ${name} AbuseStore ---`);
-  // a2 is written as a core before 0.9.0 writes it, with `phone` only (#8).
-  await abuse.recordSendAttempt({ sid: 'a1', recipient: '+15555550001', phone: '+15555550001', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
-  await abuse.recordSendAttempt({ sid: 'a2', phone: '+15555550002', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
+  await abuse.recordSendAttempt({ sid: 'a1', recipient: '+15555550001', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
+  await abuse.recordSendAttempt({ sid: 'a2', recipient: '+15555550002', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
   await abuse.recordSendAttempt({ sid: 'a3', recipient: '+15555550001', ip: '203.0.113.6', channel: 'sms', provider: 'mock', success: false });
 
   assert((await abuse.countAttemptsByIp('203.0.113.5', 60_000)) === 2, 'countAttemptsByIp returns 2');
   assert((await abuse.countAttemptsByRecipient('+15555550001', 60_000)) === 2, 'countAttemptsByRecipient returns 2');
-  assert((await abuse.countAttemptsByRecipient('+15555550002', 60_000)) === 1, 'a send recorded with phone only is counted by recipient');
   assert((await abuse.countDistinctRecipientsByIp('203.0.113.5', 60_000)) === 2, 'countDistinctRecipientsByIp returns 2');
-  assert((await abuse.countAttemptsByPhone('+15555550001', 60_000)) === 2, 'the deprecated countAttemptsByPhone gives the same answer');
-  assert((await abuse.countDistinctPhonesByIp('203.0.113.5', 60_000)) === 2, 'the deprecated countDistinctPhonesByIp gives the same answer');
+  assert(!('countAttemptsByPhone' in abuse) && !('countDistinctPhonesByIp' in abuse), 'the pre-0.9.0 method names are gone (#124)');
 }
 
 async function exerciseRateLimitStore(name, rateLimit) {
@@ -213,56 +188,49 @@ async function exerciseCooldownStore(name, cooldown) {
 
 async function exerciseRecipientIndexStore(name, stores) {
   console.log(`\n--- ${name} RecipientIndexStore ---`);
-  assert(stores.recipientIndex && stores.phoneIndex === stores.recipientIndex, 'the factory returns one index store under both names (#8)');
-  assert(!Object.keys(stores).includes('phoneIndex'), 'the old name is not enumerable, so a spread of the factory output leaves it out (#8)');
-  const original = stores.recipientIndex;
-  const stand_in = { set: async () => {}, get: async () => null, delete: async () => {}, deleteIfMatches: async () => {} };
-  stores.phoneIndex = stand_in;
-  assert(stores.recipientIndex === stand_in, 'setting the old name in place sets the new one (#8)');
-  stores.recipientIndex = original;
-  assert(stores.phoneIndex === original, 'setting the new name in place is what the old name reads (#8)');
-  const phoneIndex = stores.recipientIndex;
-  await phoneIndex.set(`idx:${name}:+91`, 'vr_x', 60);
-  assert((await phoneIndex.get(`idx:${name}:+91`)) === 'vr_x', 'set/get round trip');
-  await phoneIndex.delete(`idx:${name}:+91`);
-  assert((await phoneIndex.get(`idx:${name}:+91`)) === null, 'delete clears entry');
+  assert(stores.recipientIndex && !('phoneIndex' in stores), 'the factory returns the index as recipientIndex alone (#124)');
+  const index = stores.recipientIndex;
+  await index.set(`idx:${name}:+91`, 'vr_x', 60);
+  assert((await index.get(`idx:${name}:+91`)) === 'vr_x', 'set/get round trip');
+  await index.delete(`idx:${name}:+91`);
+  assert((await index.get(`idx:${name}:+91`)) === null, 'delete clears entry');
 
   // deleteIfMatches (#9): removes the entry only while it holds the sid.
   const key = `idx:${name}:${RUN}:cmp`;
-  await phoneIndex.set(key, 'vr_a', 60);
-  await phoneIndex.deleteIfMatches(key, 'vr_b');
-  assert((await phoneIndex.get(key)) === 'vr_a', 'deleteIfMatches with another sid keeps the entry');
-  await phoneIndex.deleteIfMatches(key, 'vr_a');
-  assert((await phoneIndex.get(key)) === null, 'deleteIfMatches with the same sid removes it');
-  await phoneIndex.deleteIfMatches(key, 'vr_a');
-  assert((await phoneIndex.get(key)) === null, 'deleteIfMatches on a missing entry is a no-op');
+  await index.set(key, 'vr_a', 60);
+  await index.deleteIfMatches(key, 'vr_b');
+  assert((await index.get(key)) === 'vr_a', 'deleteIfMatches with another sid keeps the entry');
+  await index.deleteIfMatches(key, 'vr_a');
+  assert((await index.get(key)) === null, 'deleteIfMatches with the same sid removes it');
+  await index.deleteIfMatches(key, 'vr_a');
+  assert((await index.get(key)) === null, 'deleteIfMatches on a missing entry is a no-op');
 
   // Ordered writes (#82): a live entry with a later createdAt is kept.
   const at = (ms) => new Date(Date.now() + ms);
   const ok = `ord:${name}:${RUN}`;
-  await phoneIndex.set(ok, 'vr_old', 60, at(-10_000));
-  await phoneIndex.set(ok, 'vr_new', 60, at(0));
-  assert((await phoneIndex.get(ok)) === 'vr_new', 'a newer createdAt replaces a live entry');
-  await phoneIndex.set(ok, 'vr_stale', 60, at(-20_000));
-  assert((await phoneIndex.get(ok)) === 'vr_new', 'an older createdAt is refused while the entry is live (#82)');
-  await phoneIndex.set(ok, 'vr_legacy', 60);
-  assert((await phoneIndex.get(ok)) === 'vr_legacy', 'a write without createdAt replaces, as before 0.9.0');
-  await phoneIndex.set(ok, 'vr_after_legacy', 60, at(-30_000));
-  assert((await phoneIndex.get(ok)) === 'vr_after_legacy', 'an entry written without createdAt is replaced by any write');
-  await phoneIndex.deleteIfMatches(ok, 'vr_after_legacy');
-  assert((await phoneIndex.get(ok)) === null, 'deleteIfMatches removes an entry written with createdAt');
+  await index.set(ok, 'vr_old', 60, at(-10_000));
+  await index.set(ok, 'vr_new', 60, at(0));
+  assert((await index.get(ok)) === 'vr_new', 'a newer createdAt replaces a live entry');
+  await index.set(ok, 'vr_stale', 60, at(-20_000));
+  assert((await index.get(ok)) === 'vr_new', 'an older createdAt is refused while the entry is live (#82)');
+  await index.set(ok, 'vr_legacy', 60);
+  assert((await index.get(ok)) === 'vr_legacy', 'a write without createdAt replaces, as before 0.9.0');
+  await index.set(ok, 'vr_after_legacy', 60, at(-30_000));
+  assert((await index.get(ok)) === 'vr_after_legacy', 'an entry written without createdAt is replaced by any write');
+  await index.deleteIfMatches(ok, 'vr_after_legacy');
+  assert((await index.get(ok)) === null, 'deleteIfMatches removes an entry written with createdAt');
 
   const eq = `eq:${name}:${RUN}`;
   const same = at(0);
-  await phoneIndex.set(eq, 'vr_a', 60, same);
-  await phoneIndex.set(eq, 'vr_b', 60, same);
-  assert((await phoneIndex.get(eq)) === 'vr_b', 'an equal createdAt replaces');
+  await index.set(eq, 'vr_a', 60, same);
+  await index.set(eq, 'vr_b', 60, same);
+  assert((await index.get(eq)) === 'vr_b', 'an equal createdAt replaces');
 
   const ex = `ex:${name}:${RUN}`;
-  await phoneIndex.set(ex, 'vr_new', 1, at(0));
+  await index.set(ex, 'vr_new', 1, at(0));
   await new Promise((r) => setTimeout(r, 1_200));
-  await phoneIndex.set(ex, 'vr_old', 60, at(-60_000));
-  assert((await phoneIndex.get(ex)) === 'vr_old', 'an older createdAt replaces an expired entry');
+  await index.set(ex, 'vr_old', 60, at(-60_000));
+  assert((await index.get(ex)) === 'vr_old', 'an older createdAt replaces an expired entry');
 
   // 20 rounds of 10 simultaneous writes to a new key: the first writes race
   // to insert it, and none may be lost or throw.
@@ -271,8 +239,8 @@ async function exerciseRecipientIndexStore(name, stores) {
     const race = `race:${name}:${RUN}:${round}`;
     const base = Date.now();
     const order = [...Array(10).keys()].sort(() => Math.random() - 0.5);
-    await Promise.all(order.map((i) => phoneIndex.set(race, `vr_${i}`, 60, new Date(base + i * 1000))));
-    if ((await phoneIndex.get(race)) !== 'vr_9') wrong += 1;
+    await Promise.all(order.map((i) => index.set(race, `vr_${i}`, 60, new Date(base + i * 1000))));
+    if ((await index.get(race)) !== 'vr_9') wrong += 1;
   }
   assert(wrong === 0, `in 20 rounds of 10 simultaneous writes the newest createdAt wins every round, wrong in ${wrong}`);
 }
@@ -283,7 +251,6 @@ async function exerciseAuditSink(name, audit) {
   await audit.record({
     type: 'verification_started',
     sid: `audit_${name}_1`,
-    // The new name only; Postgres keeps it in a NOT NULL column (#8).
     recipientRedacted: '+91***10',
     ip: '203.0.113.7',
     channel: 'sms',
@@ -292,8 +259,7 @@ async function exerciseAuditSink(name, audit) {
   await audit.record({
     type: 'code_dispatched',
     sid: `audit_${name}_1`,
-    // As a core before 0.9.0 sends it, with phoneRedacted only (#8).
-    phoneRedacted: '+91***10',
+    recipientRedacted: '+91***10',
     ip: '203.0.113.7',
     channel: 'sms',
     provider: 'mock',

@@ -1,4 +1,4 @@
-import type { PhoneIndexStore } from '@jadedm/nestjs-verify';
+import type { RecipientIndexStore } from '@jadedm/nestjs-verify';
 import { Collection, Db, MongoClient, MongoClientOptions } from 'mongodb';
 
 export interface MongoRecipientIndexStoreOptions {
@@ -17,9 +17,7 @@ interface PhoneIndexDoc {
   createdAt?: Date;
 }
 
-// Implements the pre-0.9.0 type name: the core range this adapter supports
-// starts before `RecipientIndexStore` existed (#8).
-export class MongoRecipientIndexStore implements PhoneIndexStore {
+export class MongoRecipientIndexStore implements RecipientIndexStore {
   private readonly col: Collection<PhoneIndexDoc>;
   private readonly ownedClient?: MongoClient;
 
@@ -45,7 +43,7 @@ export class MongoRecipientIndexStore implements PhoneIndexStore {
    * One upsert on _id whose pipeline decides, against the stored document,
    * whether to replace it: only when it has expired by the server's clock,
    * has no createdAt, or is no newer than this write (#82). Otherwise the
-   * stored fields are kept. Without createdAt (a core before 0.9.0) it always
+   * stored fields are kept. Without createdAt it always
    * replaces. The server sets and judges the expiry, as its TTL monitor does
    * (#108). The filter is an equality on _id alone, so the server retries an
    * upsert that loses an insert race (MongoDB 4.2+), and $$NOW is read in the
@@ -102,10 +100,3 @@ export class MongoRecipientIndexStore implements PhoneIndexStore {
     await this.ownedClient?.close();
   }
 }
-
-/** @deprecated Renamed to `MongoRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
-export const MongoPhoneIndexStore = MongoRecipientIndexStore;
-/** @deprecated Renamed to `MongoRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
-export type MongoPhoneIndexStore = MongoRecipientIndexStore;
-/** @deprecated Renamed to `MongoRecipientIndexStoreOptions` in 0.9.0 (#8); removed in 1.0. */
-export type MongoPhoneIndexStoreOptions = MongoRecipientIndexStoreOptions;

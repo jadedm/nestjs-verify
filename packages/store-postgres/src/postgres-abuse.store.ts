@@ -34,8 +34,8 @@ export class PostgresAbuseStore implements AbuseStore {
        VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, NOW()))`,
       [
         s.sid,
-        // A core before 0.9.0 sets only `phone` (#8); the column keeps its name.
-        s.recipient ?? s.phone,
+        // The column keeps its pre-0.9.0 name (#8).
+        s.recipient,
         s.ip ?? null,
         s.channel,
         s.provider,
@@ -80,15 +80,5 @@ export class PostgresAbuseStore implements AbuseStore {
       [ip, String(windowMs)],
     );
     return Number(rows[0]?.count ?? 0);
-  }
-
-  /** @deprecated Renamed to `countAttemptsByRecipient` in 0.9.0 (#8); removed in 1.0. */
-  async countAttemptsByPhone(phone: string, windowMs: number): Promise<number> {
-    return this.countAttemptsByRecipient(phone, windowMs);
-  }
-
-  /** @deprecated Renamed to `countDistinctRecipientsByIp` in 0.9.0 (#8); removed in 1.0. */
-  async countDistinctPhonesByIp(ip: string, windowMs: number): Promise<number> {
-    return this.countDistinctRecipientsByIp(ip, windowMs);
   }
 }

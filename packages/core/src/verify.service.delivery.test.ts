@@ -202,12 +202,12 @@ describe('VerifyService, delivery limits', () => {
       { observability: { metrics: { enabled: true, registry } } },
     );
     await service.start({ to: PHONE });
-    const sends = (await registry.getMetricsAsJSON()).find((m) => m.name === 'verify_sms_send_duration_seconds');
+    const sends = (await registry.getMetricsAsJSON()).find((m) => m.name === 'verify_send_duration_seconds');
     const counted = (sends?.values ?? []).filter((v) => nameOf(v).endsWith('_count') && v.value === 1);
     expect(counted.map((v) => v.labels)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ provider: 'stuck', outcome: 'failure' }),
-        expect.objectContaining({ provider: 'backup', outcome: 'success' }),
+        expect.objectContaining({ channel: 'sms', provider: 'stuck', outcome: 'failure' }),
+        expect.objectContaining({ channel: 'sms', provider: 'backup', outcome: 'success' }),
       ]),
     );
   });

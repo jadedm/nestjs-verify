@@ -25,13 +25,6 @@ export const VerifyErrorCode = {
    * HTTP 429. Before 0.9.0 the code was PHONE_RATE_LIMITED (#8).
    */
   RecipientRateLimited: 'RECIPIENT_RATE_LIMITED',
-  /**
-   * @deprecated Renamed to `RecipientRateLimited` in 0.9.0, and its value
-   * changed with it: code that compares against this constant keeps working,
-   * code that compares against the string 'PHONE_RATE_LIMITED' does not.
-   * Removed in 1.0.
-   */
-  PhoneRateLimited: 'RECIPIENT_RATE_LIMITED',
   /** Too many sends from this IP. HTTP 429. */
   IpRateLimited: 'IP_RATE_LIMITED',
   /** IP is touching too many distinct recipients (velocity heuristic). HTTP 429. */
@@ -115,11 +108,6 @@ export class RecipientRateLimitedException extends VerifyException {
     );
   }
 }
-
-/** @deprecated Renamed to `RecipientRateLimitedException` in 0.9.0; removed in 1.0. */
-export const PhoneRateLimitedException = RecipientRateLimitedException;
-/** @deprecated Renamed to `RecipientRateLimitedException` in 0.9.0; removed in 1.0. */
-export type PhoneRateLimitedException = RecipientRateLimitedException;
 
 export class IpRateLimitedException extends VerifyException {
   constructor(resetAt: number) {

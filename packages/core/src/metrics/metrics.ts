@@ -50,10 +50,6 @@ export interface MetricsRecorder {
   recipientRateLimitHits(channel?: string): void;
   sendDuration(channel: string, provider: string, outcome: SmsOutcome, seconds: number): void;
   checkDuration(seconds: number, channel?: string): void;
-  /** @deprecated Use recipientRateLimitHits; removed in 1.0 (#7). */
-  phoneRateLimitHits(): void;
-  /** @deprecated Use sendDuration('sms', ...); removed in 1.0 (#7). */
-  smsSendDuration(provider: string, outcome: SmsOutcome, seconds: number): void;
   /** Returns the prom-client Registry so the user can wire their /metrics endpoint. */
   getRegistry(): PromRegistry | undefined;
 }
@@ -69,8 +65,6 @@ class NoopMetricsRecorder implements MetricsRecorder {
   recipientRateLimitHits(): void {}
   sendDuration(): void {}
   checkDuration(): void {}
-  phoneRateLimitHits(): void {}
-  smsSendDuration(): void {}
   getRegistry(): undefined {
     return undefined;
   }
@@ -86,9 +80,7 @@ class PromMetricsRecorder implements MetricsRecorder {
   private readonly startsBlockedCounter: PromCounter;
   private readonly checksCounter: PromCounter;
   private readonly recipientRateLimitHitsCounter: PromCounter;
-  private readonly phoneRateLimitHitsCounter: PromCounter;
   private readonly sendDurationHistogram: PromHistogram;
-  private readonly smsSendDurationHistogram: PromHistogram;
   private readonly checkDurationHistogram: PromHistogram;
 
   constructor(
@@ -148,19 +140,10 @@ class PromMetricsRecorder implements MetricsRecorder {
       'Per-recipient rate limit counter hits.',
       [METRICS.LABEL_CHANNEL],
     );
-    this.phoneRateLimitHitsCounter = counter(
-      METRICS.COUNTER_PHONE_RATE_LIMIT_HITS,
-      'Deprecated: the same events as recipient_rate_limit_hits_total, without channel; do not add the two. Removed in 1.0.',
-    );
     this.sendDurationHistogram = histogram(
       METRICS.HIST_SEND_DURATION,
       'Wall-clock duration of a code send attempt (SMS or email), seconds.',
       [METRICS.LABEL_CHANNEL, METRICS.LABEL_PROVIDER, METRICS.LABEL_OUTCOME],
-    );
-    this.smsSendDurationHistogram = histogram(
-      METRICS.HIST_SMS_SEND_DURATION,
-      'Deprecated: the SMS sends of send_duration_seconds; do not add the two. Removed in 1.0.',
-      [METRICS.LABEL_PROVIDER, METRICS.LABEL_OUTCOME],
     );
     this.checkDurationHistogram = histogram(
       METRICS.HIST_CHECK_DURATION,
@@ -180,28 +163,15 @@ class PromMetricsRecorder implements MetricsRecorder {
   }
   recipientRateLimitHits(channel = UNKNOWN_CHANNEL): void {
     this.recipientRateLimitHitsCounter.inc({ [METRICS.LABEL_CHANNEL]: channel });
-    this.phoneRateLimitHitsCounter.inc();
   }
   sendDuration(channel: string, provider: string, outcome: SmsOutcome, seconds: number): void {
     this.sendDurationHistogram.observe(
       { [METRICS.LABEL_CHANNEL]: channel, [METRICS.LABEL_PROVIDER]: provider, [METRICS.LABEL_OUTCOME]: outcome },
       seconds,
     );
-    // The deprecated histogram keeps its meaning: SMS sends only.
-    if (channel !== 'sms') return;
-    this.smsSendDurationHistogram.observe(
-      { [METRICS.LABEL_PROVIDER]: provider, [METRICS.LABEL_OUTCOME]: outcome },
-      seconds,
-    );
   }
   checkDuration(seconds: number, channel = UNKNOWN_CHANNEL): void {
     this.checkDurationHistogram.observe({ [METRICS.LABEL_CHANNEL]: channel }, seconds);
-  }
-  phoneRateLimitHits(): void {
-    this.recipientRateLimitHits();
-  }
-  smsSendDuration(provider: string, outcome: SmsOutcome, seconds: number): void {
-    this.sendDuration('sms', provider, outcome, seconds);
   }
   getRegistry(): PromRegistry {
     return this.registry;

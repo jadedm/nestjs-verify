@@ -36,7 +36,7 @@ Mongoose users: `mongooseConnection.db` returns the underlying `Db`.
 
 ## Atomicity
 
-`reserveAttempt` issues a single `findOneAndUpdate` whose filter matches only a `pending` document below its `maxAttempts`, so of any number of simultaneous checks at most `maxAttempts` get to compare a code. The deprecated `incrementAttempts` is kept for direct callers.
+`reserveAttempt` issues a single `findOneAndUpdate` whose filter matches only a `pending` document below its `maxAttempts`, so of any number of simultaneous checks at most `maxAttempts` get to compare a code.
 
 ## TTL
 

@@ -123,19 +123,17 @@ describe('VerifyService, email channel', () => {
     expect(await stores.recipientIndex.get('a@example.com')).toBeFalsy();
   });
 
-  it('keeps email sends out of the SMS send-duration metric (Codex review)', async () => {
+  it('labels email and SMS sends by channel in the send-duration metric (Codex review, #7)', async () => {
     // prom-client sets metricName on histogram values but leaves it off the public type.
     const nameOf = (v: object) => String((v as { metricName?: string }).metricName);
     const { Registry } = await import('prom-client');
     const registry = new Registry();
     service = build({ observability: { metrics: { enabled: true, registry } } });
     await service.start({ to: 'a@example.com', channel: 'email' });
-    const sends = (await registry.getMetricsAsJSON()).find((m) => m.name === 'verify_sms_send_duration_seconds');
-    const count = (sends?.values ?? []).filter((v) => nameOf(v).endsWith('_count'));
-    expect(count.every((v) => v.value === 0)).toBe(true);
     await service.start({ to: '+14155552671' });
-    const after = (await registry.getMetricsAsJSON()).find((m) => m.name === 'verify_sms_send_duration_seconds');
-    expect((after?.values ?? []).some((v) => nameOf(v).endsWith('_count') && v.value === 1)).toBe(true);
+    const sends = (await registry.getMetricsAsJSON()).find((m) => m.name === 'verify_send_duration_seconds');
+    const counts = (sends?.values ?? []).filter((v) => nameOf(v).endsWith('_count') && v.value === 1).map((v) => v.labels.channel);
+    expect(counts.sort()).toEqual(['email', 'sms']);
   });
 
   it('locks out after the maximum wrong codes (case 3)', async () => {
@@ -157,7 +155,7 @@ describe('VerifyService, email channel', () => {
     const spies = [
       vi.spyOn(stores.rateLimit, 'hit'),
       vi.spyOn(stores.abuse, 'recordSendAttempt'),
-      vi.spyOn(stores.abuse, 'countDistinctPhonesByIp'),
+      vi.spyOn(stores.abuse, 'countDistinctRecipientsByIp'),
       vi.spyOn(stores.verify, 'create'),
       vi.spyOn(stores.recipientIndex, 'set'),
       vi.spyOn(stores.cooldown, 'start'),

@@ -161,7 +161,7 @@ describe('VerifyService, index entries removed only while they hold this sid (#9
       delete: async () => undefined,
     };
     const index = legacy as unknown as typeof stores.recipientIndex;
-    stores = { ...stores, recipientIndex: index, phoneIndex: index };
+    stores = { ...stores, recipientIndex: index };
     expect(() => build(provider())).toThrow('stores.recipientIndex must implement deleteIfMatches');
   });
 

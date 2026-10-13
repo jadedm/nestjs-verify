@@ -58,7 +58,7 @@ To manage the schema yourself, pass `skipSchemaSetup: true`: no DDL runs, and st
 
 ## Atomicity
 
-`reserveAttempt` is a single `UPDATE ... RETURNING` that increments the counter only while the row is `pending` and below `max_attempts`, so of any number of simultaneous checks at most `max_attempts` get to compare a code. The deprecated `incrementAttempts` is kept for direct callers.
+`reserveAttempt` is a single `UPDATE ... RETURNING` that increments the counter only while the row is `pending` and below `max_attempts`, so of any number of simultaneous checks at most `max_attempts` get to compare a code.
 
 ## Individual stores
 

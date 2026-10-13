@@ -1,4 +1,4 @@
-import type { PhoneIndexStore } from '@jadedm/nestjs-verify';
+import type { RecipientIndexStore } from '@jadedm/nestjs-verify';
 import type { RedisLike } from './redis-like.interface.js';
 
 // The value is `sid|createdAtMs` (#82), or a plain sid when written before
@@ -41,9 +41,7 @@ export interface RedisRecipientIndexStoreOptions {
   keyPrefix?: string;
 }
 
-// Implements the pre-0.9.0 type name: the core range this adapter supports
-// starts before `RecipientIndexStore` existed (#8).
-export class RedisRecipientIndexStore implements PhoneIndexStore {
+export class RedisRecipientIndexStore implements RecipientIndexStore {
   private readonly client: RedisLike;
   private readonly prefix: string;
 
@@ -69,10 +67,3 @@ export class RedisRecipientIndexStore implements PhoneIndexStore {
     await this.client.eval(DELETE_IF_MATCHES_SCRIPT, 1, this.prefix + phone, sid);
   }
 }
-
-/** @deprecated Renamed to `RedisRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
-export const RedisPhoneIndexStore = RedisRecipientIndexStore;
-/** @deprecated Renamed to `RedisRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
-export type RedisPhoneIndexStore = RedisRecipientIndexStore;
-/** @deprecated Renamed to `RedisRecipientIndexStoreOptions` in 0.9.0 (#8); removed in 1.0. */
-export type RedisPhoneIndexStoreOptions = RedisRecipientIndexStoreOptions;
