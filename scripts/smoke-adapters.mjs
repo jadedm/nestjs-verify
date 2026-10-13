@@ -67,7 +67,11 @@ function recordFixture(sid, overrides = {}) {
 // fixture before the first n tries of each case; SMOKE_SIMULATE_NOT_FOUND
 // answers not-found while the record exists.
 const SIMULATE_SWEEP = Number(process.env.SMOKE_SIMULATE_SWEEP ?? 0);
-const SIMULATE_NOT_FOUND = Boolean(process.env.SMOKE_SIMULATE_NOT_FOUND);
+const SIMULATE_NOT_FOUND = process.env.SMOKE_SIMULATE_NOT_FOUND === '1';
+if (!Number.isInteger(SIMULATE_SWEEP) || SIMULATE_SWEEP < 0) {
+  console.error(`SMOKE_SIMULATE_SWEEP must be a whole number; got "${process.env.SMOKE_SIMULATE_SWEEP}"`);
+  process.exit(2);
+}
 const SWEEP_TRIES = 3;
 async function reserveExpired(verify, label, fixtureFor, reserve = (sid) => verify.reserveAttempt(sid)) {
   for (let attempt = 1; attempt <= SWEEP_TRIES; attempt += 1) {
@@ -79,7 +83,7 @@ async function reserveExpired(verify, label, fixtureFor, reserve = (sid) => veri
     if (!swept) return result;
     console.log(`  retry: ${label}: ${fixture.sid} was swept before the reservation`);
   }
-  assert(false, `${label}: the fixture was swept on all ${SWEEP_TRIES} tries`);
+  assert(false, `${label}: the fixture was gone on all ${SWEEP_TRIES} tries; a TTL sweep every time is unlikely, so suspect a store that deletes an expired record (or a get that hides one)`);
 }
 
 async function exerciseVerifyStore(name, verify) {
