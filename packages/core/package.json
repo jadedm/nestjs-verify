@@ -1,6 +1,6 @@
 {
   "name": "@jadedm/nestjs-verify",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Self-hosted Twilio Verify-style OTP for NestJS. Bring your own SMS or email provider and store.",
   "keywords": [
     "nestjs",
