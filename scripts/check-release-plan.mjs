@@ -18,6 +18,10 @@
 //   version on npm refuses while that adapter is not released with it;
 // - probe changesets that exist only in memory, which check that a core
 //   release inside the ranges releases core alone under this config.
+// It also requires onlyUpdatePeerDependentsWhenOutOfRange. Changesets 3's
+// planner no longer needs it, but `changeset version` still reads it: without
+// it, any core minor rewrites every adapter's range floor to that minor,
+// released or not, dropping the older cores in a patch (#97).
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +64,13 @@ if (readPre?.mode === 'pre') {
 // will (it adds stable releases for packages that had prereleases); the
 // probes, which test the config rather than what is pending, plan without it.
 const preState = readPre;
+if (config.___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH?.onlyUpdatePeerDependentsWhenOutOfRange !== true) {
+  console.error(
+    'check-release-plan: .changeset/config.json must set ___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange to true; ' +
+      'without it `changeset version` rewrites every adapter core range to the new core version',
+  );
+  process.exit(1);
+}
 const linkedWith = (name) => config.linked.find((group) => group.includes(name)) ?? [name];
 const highest = (versions) => versions.reduce((a, b) => (semver.gt(b, a) ? b : a));
 
