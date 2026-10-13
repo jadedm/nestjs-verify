@@ -3,6 +3,7 @@ import { RecipientIndexStore } from '../interfaces/recipient-index-store.interfa
 interface Entry {
   sid: string;
   expiresAt: number;
+  createdAt?: number;
 }
 
 /**
@@ -11,8 +12,15 @@ interface Entry {
 export class MemoryRecipientIndexStore implements RecipientIndexStore {
   private readonly entries = new Map<string, Entry>();
 
-  async set(recipient: string, sid: string, ttlSeconds: number): Promise<void> {
-    this.entries.set(recipient, { sid, expiresAt: Date.now() + ttlSeconds * 1000 });
+  async set(recipient: string, sid: string, ttlSeconds: number, createdAt?: Date): Promise<void> {
+    const current = this.entries.get(recipient);
+    const newerIsLive =
+      current?.createdAt !== undefined &&
+      createdAt !== undefined &&
+      current.expiresAt > Date.now() &&
+      current.createdAt > createdAt.getTime();
+    if (newerIsLive) return;
+    this.entries.set(recipient, { sid, expiresAt: Date.now() + ttlSeconds * 1000, createdAt: createdAt?.getTime() });
   }
 
   async get(recipient: string): Promise<string | null> {

@@ -29,13 +29,22 @@ export class PostgresRecipientIndexStore implements PhoneIndexStore {
     this.table = opts.tableName ?? 'verify_phone_index';
   }
 
-  async set(phone: string, sid: string, ttlSeconds: number): Promise<void> {
+  /**
+   * One statement: the update applies only when the current row has expired,
+   * has no created_at (written before 0.9.0), or is no newer than this one;
+   * a write without createdAt always applies (#82).
+   */
+  async set(phone: string, sid: string, ttlSeconds: number, createdAt?: Date): Promise<void> {
     await this.pool.query(
-      `INSERT INTO ${this.table} (phone, sid, expires_at)
-       VALUES ($1, $2, NOW() + ($3 || ' seconds')::interval)
+      `INSERT INTO ${this.table} AS current (phone, sid, expires_at, created_at)
+       VALUES ($1, $2, NOW() + ($3 || ' seconds')::interval, $4)
        ON CONFLICT (phone) DO UPDATE
-       SET sid = EXCLUDED.sid, expires_at = EXCLUDED.expires_at`,
-      [phone, sid, String(ttlSeconds)],
+       SET sid = EXCLUDED.sid, expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at
+       WHERE EXCLUDED.created_at IS NULL
+          OR current.created_at IS NULL
+          OR current.expires_at <= NOW()
+          OR current.created_at <= EXCLUDED.created_at`,
+      [phone, sid, String(ttlSeconds), createdAt ?? null],
     );
   }
 

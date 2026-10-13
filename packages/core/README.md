@@ -116,7 +116,7 @@ The architectural shape of 0.3.0 onward. Every piece of state lives behind a sto
 | `AbuseStore` | Send-attempt history for the IP velocity heuristic. Optional. | Postgres, Mongo |
 | `RateLimitStore` | Fixed-window counter per recipient and per IP. Atomic. | Postgres, Mongo, Redis |
 | `CooldownStore` | Per-recipient cooldown between sends. `claim` must decide the holder atomically, so of simultaneous starts for one recipient only one sends; `release` ends a claim only for its holder. | Postgres, Mongo, Redis |
-| `RecipientIndexStore` | Recipient -> sid lookup so check() does not need the sid. `deleteIfMatches` removes an entry only while it holds the given sid. Named `PhoneIndexStore` before 0.9.0. | Postgres, Mongo, Redis |
+| `RecipientIndexStore` | Recipient -> sid lookup so check() does not need the sid. `set` is given the record's `createdAt` and refuses to replace a live entry created later, so a stalled write from an older start cannot replace a newer one. `deleteIfMatches` removes an entry only while it holds the given sid. Named `PhoneIndexStore` before 0.9.0. | Postgres, Mongo, Redis |
 
 You can use a single backend for all five, or split durable vs ephemeral (Postgres for `verify` and `abuse`, Redis for the other three) for speed.
 
@@ -180,7 +180,7 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 The plan to 1.0 is tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). 1.0 adds no new features: it is the fixes and breaking renames below, then a frozen public interface.
 
 1. Store and policy names ([#8](https://github.com/jadedm/nestjs-verify/issues/8)) and metric and telemetry names ([#7](https://github.com/jadedm/nestjs-verify/issues/7)) were renamed from phone to recipient in 0.9.0, and metrics gained a `channel` label. The old names are removed in 1.0.
-2. A recipient-index write stalled for longer than the cooldown claim can replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). It cannot cause a second code to be sent. Planned for 0.9.0.
+2. Fixed in 0.9.0: a recipient-index write stalled for longer than the cooldown claim could replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). Index writes are now ordered by the record's `createdAt`. A newer start is created at least `cooldownSeconds` after the older one (and a full claim window, the larger of `cooldownSeconds` and the delivery time limit plus 30 seconds, after an older start that stalled), so only app servers whose clocks differ by more than that could misorder them. With `cooldownSeconds: 0` there is no cooldown or claim, and ordering rests on the clocks alone.
 3. A code's deadline is set by the server's clock and judged by both the server's and the database's, so steady skew between them shortens the effective TTL ([#108](https://github.com/jadedm/nestjs-verify/issues/108)). Planned for 0.9.0.
 
 ### After 1.0

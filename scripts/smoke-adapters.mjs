@@ -226,6 +226,39 @@ async function exerciseRecipientIndexStore(name, stores) {
   assert((await phoneIndex.get(key)) === null, 'deleteIfMatches with the same sid removes it');
   await phoneIndex.deleteIfMatches(key, 'vr_a');
   assert((await phoneIndex.get(key)) === null, 'deleteIfMatches on a missing entry is a no-op');
+
+  // Ordered writes (#82): a live entry with a later createdAt is kept.
+  const at = (ms) => new Date(Date.now() + ms);
+  const ok = `ord:${name}:${RUN}`;
+  await phoneIndex.set(ok, 'vr_old', 60, at(-10_000));
+  await phoneIndex.set(ok, 'vr_new', 60, at(0));
+  assert((await phoneIndex.get(ok)) === 'vr_new', 'a newer createdAt replaces a live entry');
+  await phoneIndex.set(ok, 'vr_stale', 60, at(-20_000));
+  assert((await phoneIndex.get(ok)) === 'vr_new', 'an older createdAt is refused while the entry is live (#82)');
+  await phoneIndex.set(ok, 'vr_legacy', 60);
+  assert((await phoneIndex.get(ok)) === 'vr_legacy', 'a write without createdAt replaces, as before 0.9.0');
+  await phoneIndex.set(ok, 'vr_after_legacy', 60, at(-30_000));
+  assert((await phoneIndex.get(ok)) === 'vr_after_legacy', 'an entry written without createdAt is replaced by any write');
+  await phoneIndex.deleteIfMatches(ok, 'vr_after_legacy');
+  assert((await phoneIndex.get(ok)) === null, 'deleteIfMatches removes an entry written with createdAt');
+
+  const eq = `eq:${name}:${RUN}`;
+  const same = at(0);
+  await phoneIndex.set(eq, 'vr_a', 60, same);
+  await phoneIndex.set(eq, 'vr_b', 60, same);
+  assert((await phoneIndex.get(eq)) === 'vr_b', 'an equal createdAt replaces');
+
+  const ex = `ex:${name}:${RUN}`;
+  await phoneIndex.set(ex, 'vr_new', 1, at(0));
+  await new Promise((r) => setTimeout(r, 1_200));
+  await phoneIndex.set(ex, 'vr_old', 60, at(-60_000));
+  assert((await phoneIndex.get(ex)) === 'vr_old', 'an older createdAt replaces an expired entry');
+
+  const race = `race:${name}:${RUN}`;
+  const order = [3, 9, 0, 7, 1, 8, 2, 6, 4, 5];
+  const base = Date.now();
+  await Promise.all(order.map((i) => phoneIndex.set(race, `vr_${i}`, 60, new Date(base + i * 1000))));
+  assert((await phoneIndex.get(race)) === 'vr_9', `of 10 simultaneous writes the newest createdAt wins, got ${await phoneIndex.get(race)}`);
 }
 
 async function exerciseAuditSink(name, audit) {
@@ -366,6 +399,12 @@ async function smokePostgres() {
   await exerciseRateLimitStore('Postgres', pg.rateLimit);
   await exerciseCooldownStore('Postgres', pg.cooldown);
   await exerciseRecipientIndexStore('Postgres', pg);
+  const { rows: version } = await pg.pool.query(`SELECT version FROM verify_schema_versions WHERE package = '@jadedm/nestjs-verify-postgres'`);
+  assert(version[0]?.version === 4, `schema at migration 4 (#82), got ${version[0]?.version}`);
+  const { rows: column } = await pg.pool.query(
+    `SELECT data_type FROM information_schema.columns WHERE table_name = 'verify_phone_index' AND column_name = 'created_at'`,
+  );
+  assert(column[0]?.data_type === 'timestamp with time zone', 'verify_phone_index.created_at exists (#82)');
   await exerciseAuditSink('Postgres', pg.audit);
   await exerciseEmailFlow('Postgres', pg);
   await exerciseServerClockExpiry('Postgres', pg);
@@ -400,6 +439,10 @@ async function smokeRedis() {
   await exerciseRateLimitStore('Redis', r.rateLimit);
   await exerciseCooldownStore('Redis', r.cooldown);
   await exerciseRecipientIndexStore('Redis', r);
+  // A value whose suffix is not a timestamp counts as an entry without one (#82).
+  await client.set('verify:idx:junk', 'vr_x|not-a-number', 'EX', 60);
+  await r.recipientIndex.set('junk', 'vr_y', 60, new Date());
+  assert((await r.recipientIndex.get('junk')) === 'vr_y', 'a value with a non-numeric suffix is replaced, not an error');
   await exerciseEmailFlow('Redis', { ...r, verify: new MemoryVerifyStore() });
   await client.quit();
 }

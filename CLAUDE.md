@@ -106,6 +106,10 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
   Counting after comparing let a burst of checks compare more codes than `maxAttempts` (0.8.0).
   `incrementAttempts` remains on the shipped stores, deprecated, and is no longer in the interface.
 - `markStatus` only transitions out of `pending` and returns false if the record was no longer pending.
+- `RecipientIndexStore.set(recipient, sid, ttl, createdAt)` refuses, atomically, to replace a live
+  entry whose `createdAt` is later; an expired entry, one without `createdAt`, or a call without it
+  is overwritten (#82). Redis keeps the value as `sid|createdAtMs` in one key, so every index script
+  stays on one cluster slot.
 - `CooldownStore.claim` decides the holder in one atomic operation and renews for the same holder;
   `release` and `RecipientIndexStore.deleteIfMatches` remove only what the given holder or sid still owns
   (#13, #9). The service never deletes an index entry with the unconditional `delete`.
