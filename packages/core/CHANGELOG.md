@@ -1,5 +1,47 @@
 # @jadedm/nestjs-verify
 
+## 0.9.0
+
+### Minor Changes
+
+- 16f4c47: Breaking: a `channel` label on metrics, and recipient-neutral telemetry names (#7).
+
+  - `verify_starts_total`, `verify_starts_blocked_total`, `verify_checks_total` and `verify_check_duration_seconds` gain a `channel` label (`sms` or `email`).
+  - `verify_send_duration_seconds{channel,provider,outcome}` times every send, SMS and email. `verify_sms_send_duration_seconds` stays, deprecated, for SMS sends only.
+  - `verify_recipient_rate_limit_hits_total{channel}` replaces `verify_phone_rate_limit_hits_total`, which stays, deprecated and unlabelled. Old and new count the same events; do not add them.
+  - The blocked-start reason and the audit outcome `phone_rate_limit` are now `recipient_rate_limit`, with no alias, because an alias would count every block twice.
+  - Spans set `verify.recipient_redacted` and, until 1.0, `verify.phone_redacted`; the check span now sets `verify.channel`. Velocity audit events carry `distinctRecipients` and, until 1.0, `distinctPhones`. `LoggerAuditSink` logs `recipient` and, until 1.0, `phone`.
+  - The exported `MetricsRecorder` interface gains `sendDuration` and `recipientRateLimitHits`; its other methods take an optional channel. A TypeScript class implementing it must add the new methods.
+  - Fixed: a second recorder on the same prom-client registry, from a second `VerifyModule` or a test harness, threw "already been registered". It now shares the registry's collectors, and refuses at construction one registered under the same name with other labels, as another metric type, or with exemplars enabled.
+
+- a29f8f7: Breaking: recipient-neutral names (#8). Fields, options and store methods that held a phone or an email address are renamed from phone to recipient. The old names still work in 0.9 and log a deprecation warning at boot; they are removed in 1.0.
+
+  - `VerificationRecord.phone` and `SendAttempt.phone` are now `recipient`. Core writes both names and keeps reading stores that return only `phone`. A custom store written for 0.8 still runs; its TypeScript now needs `recipient`.
+  - `PhoneIndexStore` is now `RecipientIndexStore`, `stores.phoneIndex` is now `stores.recipientIndex`, and `MemoryPhoneIndexStore` is now `MemoryRecipientIndexStore`. `createMemoryStores()` returns the index under both keys.
+  - `rateLimit.perPhone` is now `rateLimit.perRecipient`, and `abuse.maxDistinctPhonesPerIp` is now `abuse.maxDistinctRecipientsPerIp`. Setting an old and a new name to different values fails at boot.
+  - `AbuseStore.countAttemptsByPhone` and `countDistinctPhonesByIp` are now `countAttemptsByRecipient` and `countDistinctRecipientsByIp`. Core calls the new name and falls back to the old one.
+  - `AuditEvent.phoneRedacted` is now `recipientRedacted`. Core sets both.
+  - The error code `PHONE_RATE_LIMITED` is now `RECIPIENT_RATE_LIMITED`. Clients that compare the response's `code` to the string `'PHONE_RATE_LIMITED'` must change. `VerifyErrorCode.PhoneRateLimited` and `PhoneRateLimitedException` remain as deprecated aliases that carry the new code.
+
+  The span attribute, the metric and the audit outcome that still say phone are renamed in #7. Database tables and columns keep their names.
+
+### Patch Changes
+
+- 9700d95: An older start's stalled index write can no longer replace a newer verification's entry (#82). Before, the newer verification's correct code then answered `NO_PENDING_VERIFICATION`.
+
+  - `RecipientIndexStore.set` takes the record's `createdAt` as an optional fourth argument. The shipped stores refuse, atomically, to replace a live entry created later; an expired entry, an entry without `createdAt`, or a write without it is replaced as before.
+  - Postgres: migration 4 adds `verify_phone_index.created_at`. Upgrade every instance of the adapter together. With `skipSchemaSetup`, apply migration 4 from the exported `MIGRATIONS` first, or startup fails on the version check.
+  - Redis (breaking, hence a minor): index values are stored as `sid|createdAt` in the same key; `get` and `deleteIfMatches` read both forms. An older Redis adapter cannot read the new form, so deploy it to all instances at once.
+  - Mongo: whether to replace the entry is decided inside one upsert on `_id`, which the server retries when two writes race to insert, so the newest entry wins and no write is lost.
+
+- 2046637: The store that judges a code's deadline also sets it (#108). Before, the app server's clock set `expiresAt` and the database's judged it, so steady skew between them made codes expire early or late by the skew.
+
+  - `VerifyStore.create(record, ttlSeconds?)`: given the TTL, a store sets the deadline from its own clock and returns it. Postgres stores `NOW() + ttl`; Mongo stores `$$NOW + ttl` and still refuses an existing sid. The start response's `expiresAt` is that deadline. A store that ignores the TTL keeps the record's `expiresAt`, as before.
+  - Core no longer compares `expiresAt` with its own clock before reserving an attempt; the store's `reserveAttempt` judges expiry on the clock that set it.
+  - The index entry's TTL is the code's TTL less the time the start has taken, measured on one clock.
+  - Mongo recipient index: written and read by the server's clock (`$$NOW`), the clock its TTL monitor uses.
+  - Custom stores: core's own expiry check is gone, so `reserveAttempt` must refuse an expired record, as the interface has required since 0.8.0.
+
 ## 0.8.1
 
 ### Patch Changes

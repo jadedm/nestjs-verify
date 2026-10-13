@@ -1,5 +1,11 @@
 # @jadedm/nestjs-verify-ses
 
+## 0.9.0
+
+### Patch Changes
+
+- a29f8f7: Core 0.9 is now in the supported peer range. No code change.
+
 ## 0.8.0
 
 ### Patch Changes
