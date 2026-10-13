@@ -15,7 +15,12 @@ export interface AuditEvent {
    * Recipient with most of it redacted: a phone as +919***10, an email as
    * a***@example.com (first character and domain kept). Never the raw value.
    */
-  phoneRedacted: string;
+  recipientRedacted: string;
+  /**
+   * @deprecated Same value as `recipientRedacted`, for sinks written before
+   * 0.9.0 (#8). Core sets both; removed in 1.0.
+   */
+  phoneRedacted?: string;
   /** Client IP, when available. */
   ip?: string;
   channel: string;

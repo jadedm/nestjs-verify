@@ -120,7 +120,7 @@ describe('VerifyService, email channel', () => {
     expect(await errorCode(service.start({ to: 'a@example.com', channel: 'email' }))).toBe(
       VerifyErrorCode.SmsDispatchFailed,
     );
-    expect(await stores.phoneIndex.get('a@example.com')).toBeFalsy();
+    expect(await stores.recipientIndex.get('a@example.com')).toBeFalsy();
   });
 
   it('keeps email sends out of the SMS send-duration metric (Codex review)', async () => {
@@ -159,7 +159,7 @@ describe('VerifyService, email channel', () => {
       vi.spyOn(stores.abuse, 'recordSendAttempt'),
       vi.spyOn(stores.abuse, 'countDistinctPhonesByIp'),
       vi.spyOn(stores.verify, 'create'),
-      vi.spyOn(stores.phoneIndex, 'set'),
+      vi.spyOn(stores.recipientIndex, 'set'),
       vi.spyOn(stores.cooldown, 'start'),
     ];
     expect(await errorCode(service.start({ to, channel, ip: '10.0.0.1' }))).toBe(
@@ -204,15 +204,15 @@ describe('VerifyService, email channel', () => {
     );
     stores.cooldown = createMemoryStores().cooldown;
     stores.rateLimit = createMemoryStores().rateLimit;
-    service = build({ attempts: { cooldownSeconds: 0 }, rateLimit: { perPhone: { count: 1, windowSeconds: 60 } } });
+    service = build({ attempts: { cooldownSeconds: 0 }, rateLimit: { perRecipient: { count: 1, windowSeconds: 60 } } });
     await service.start({ to: 'b@example.com', channel: 'email' });
     expect(await errorCode(service.start({ to: 'b@example.com', channel: 'email' }))).toBe(
-      VerifyErrorCode.PhoneRateLimited,
+      VerifyErrorCode.RecipientRateLimited,
     );
   });
 
   it('applies the IP velocity check to email addresses (case 9)', async () => {
-    service = build({ abuse: { maxDistinctPhonesPerIp: 2, velocityWindowSeconds: 60 } });
+    service = build({ abuse: { maxDistinctRecipientsPerIp: 2, velocityWindowSeconds: 60 } });
     await service.start({ to: 'a@example.com', channel: 'email', ip: '10.0.0.9' });
     await service.start({ to: 'b@example.com', channel: 'email', ip: '10.0.0.9' });
     expect(await errorCode(service.start({ to: 'c@example.com', channel: 'email', ip: '10.0.0.9' }))).toBe(
@@ -237,7 +237,7 @@ describe('VerifyService, email channel', () => {
     expect(await errorCode(service.start({ to: 'a@example.com', channel: 'email' }))).toBe(
       VerifyErrorCode.SmsDispatchFailed,
     );
-    expect(await stores.phoneIndex.get('a@example.com')).toBeFalsy();
+    expect(await stores.recipientIndex.get('a@example.com')).toBeFalsy();
     expect(await stores.cooldown.remaining('a@example.com')).toBe(0);
   });
 
@@ -251,7 +251,7 @@ describe('VerifyService, email channel', () => {
   it('reports approved only to the check that approved, never to a later check with any code', async () => {
     await service.start({ to: 'a@example.com', channel: 'email' });
     // Keep the index pointing at the approved record, as a failed delete would.
-    vi.spyOn(stores.phoneIndex, 'deleteIfMatches').mockResolvedValue(undefined);
+    vi.spyOn(stores.recipientIndex, 'deleteIfMatches').mockResolvedValue(undefined);
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
     expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('canceled');
@@ -259,7 +259,7 @@ describe('VerifyService, email channel', () => {
 
   it('still reports approved when the index cleanup fails, and nothing after it does', async () => {
     await service.start({ to: 'a@example.com', channel: 'email' });
-    vi.spyOn(stores.phoneIndex, 'deleteIfMatches').mockRejectedValue(new Error('store down'));
+    vi.spyOn(stores.recipientIndex, 'deleteIfMatches').mockRejectedValue(new Error('store down'));
     expect((await service.check({ to: 'a@example.com', code: CODE })).state).toBe('approved');
     expect((await service.check({ to: 'a@example.com', code: '000000' })).state).toBe('canceled');
   });

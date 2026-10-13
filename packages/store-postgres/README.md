@@ -1,6 +1,6 @@
 # @jadedm/nestjs-verify-postgres
 
-Postgres store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/package/@jadedm/nestjs-verify). Provides all five stores (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `PhoneIndexStore`) and an audit sink, plus the schema migrations.
+Postgres store adapter for [`@jadedm/nestjs-verify`](https://www.npmjs.com/package/@jadedm/nestjs-verify). Provides all five stores (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `RecipientIndexStore`) and an audit sink, plus the schema migrations.
 
 ```bash
 pnpm add @jadedm/nestjs-verify-postgres pg

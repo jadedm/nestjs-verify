@@ -3,7 +3,7 @@ import { PostgresVerifyStore } from './postgres-verify.store.js';
 import { PostgresAbuseStore } from './postgres-abuse.store.js';
 import { PostgresRateLimitStore } from './postgres-rate-limit.store.js';
 import { PostgresCooldownStore } from './postgres-cooldown.store.js';
-import { PostgresPhoneIndexStore } from './postgres-phone-index.store.js';
+import { PostgresRecipientIndexStore } from './postgres-recipient-index.store.js';
 import { PostgresAuditSink } from './postgres-audit.sink.js';
 import { runMigrations, RunMigrationsOptions } from './migration-runner.js';
 
@@ -18,7 +18,9 @@ export interface PostgresStores {
   abuse: PostgresAbuseStore;
   rateLimit: PostgresRateLimitStore;
   cooldown: PostgresCooldownStore;
-  phoneIndex: PostgresPhoneIndexStore;
+  recipientIndex: PostgresRecipientIndexStore;
+  /** @deprecated The same object as `recipientIndex`, under its pre-0.9.0 name; removed in 1.0. */
+  phoneIndex: PostgresRecipientIndexStore;
   audit: PostgresAuditSink;
   /** The shared pg.Pool. Use this to close cleanly on shutdown. */
   pool: Pool;
@@ -30,7 +32,7 @@ export interface PostgresStores {
  * stores plus the pool so you can close it on shutdown.
  *
  * @example
- * const { verify, abuse, rateLimit, cooldown, phoneIndex } =
+ * const { verify, abuse, rateLimit, cooldown, recipientIndex } =
  *   await createPostgresStores({ connectionString: process.env.DATABASE_URL });
  */
 export async function createPostgresStores(
@@ -60,13 +62,28 @@ export async function createPostgresStores(
     throw err;
   }
 
-  return {
+  const recipientIndex = new PostgresRecipientIndexStore({ pool });
+  const stores = {
     verify: new PostgresVerifyStore({ pool }),
     abuse: new PostgresAbuseStore({ pool }),
     rateLimit: new PostgresRateLimitStore({ pool }),
     cooldown: new PostgresCooldownStore({ pool }),
-    phoneIndex: new PostgresPhoneIndexStore({ pool }),
+    recipientIndex,
     audit: new PostgresAuditSink({ pool }),
     pool,
+  };
+  // `phoneIndex`, the pre-0.9.0 name (#8), reads and writes `recipientIndex`,
+  // so the two cannot disagree on this object, however it is changed. It is
+  // not enumerable, so a spread such as `{ ...stores, recipientIndex: other }`
+  // leaves it out. The type still lists it; on a spread copy it is undefined.
+  return Object.defineProperty(stores, 'phoneIndex', {
+    get: () => stores.recipientIndex,
+    set: (store) => {
+      stores.recipientIndex = store;
+    },
+    enumerable: false,
+    configurable: true,
+  }) as typeof stores & {
+    phoneIndex: typeof recipientIndex;
   };
 }

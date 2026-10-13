@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { MemoryPhoneIndexStore } from './memory-phone-index.store.js';
+import { MemoryRecipientIndexStore } from './memory-recipient-index.store.js';
 
-describe('MemoryPhoneIndexStore', () => {
-  let store: MemoryPhoneIndexStore;
+describe('MemoryRecipientIndexStore', () => {
+  let store: MemoryRecipientIndexStore;
   beforeEach(() => {
-    store = new MemoryPhoneIndexStore();
+    store = new MemoryRecipientIndexStore();
   });
 
   it('round-trips a set then get', async () => {
@@ -34,9 +34,9 @@ describe('MemoryPhoneIndexStore', () => {
   });
 });
 
-describe('MemoryPhoneIndexStore.deleteIfMatches (#9)', () => {
+describe('MemoryRecipientIndexStore.deleteIfMatches (#9)', () => {
   it('removes the entry only while it holds the sid', async () => {
-    const store = new MemoryPhoneIndexStore();
+    const store = new MemoryRecipientIndexStore();
     await store.set('+1', 'vr_a', 60);
     await store.deleteIfMatches('+1', 'vr_b');
     expect(await store.get('+1')).toBe('vr_a');

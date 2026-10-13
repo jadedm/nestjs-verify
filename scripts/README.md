@@ -4,7 +4,7 @@ Operational scripts for this repo. Not shipped to npm.
 
 ## smoke-adapters.mjs
 
-Live integration smoke for the Postgres, Mongo and Redis store adapters. Exercises every store contract (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `PhoneIndexStore`) and the audit sinks against real databases, runs a whole email verification through `VerifyService` on each backend, and asserts each invariant. Use this before cutting a release that touches the adapters, or to verify that a published version still works on a target stack.
+Live integration smoke for the Postgres, Mongo and Redis store adapters. Exercises every store contract (`VerifyStore`, `AbuseStore`, `RateLimitStore`, `CooldownStore`, `RecipientIndexStore`) and the audit sinks against real databases, runs a whole email verification through `VerifyService` on each backend, and asserts each invariant. Use this before cutting a release that touches the adapters, or to verify that a published version still works on a target stack.
 
 ### One-shot run
 
@@ -84,8 +84,8 @@ The table lists the `VerifyStore` and `AbuseStore` invariants (`incrementAttempt
 | 12 | `incrementAttempts` on terminal status returns outcome `not-pending` |
 | 13 | `delete` removes the record |
 | A1 | `countAttemptsByIp` returns the correct count within window |
-| A2 | `countAttemptsByPhone` returns the correct count within window |
-| A3 | `countDistinctPhonesByIp` returns the correct distinct count |
+| A2 | `countAttemptsByRecipient` returns the correct count within window, including a send recorded with `phone` only (a core before 0.9.0); the deprecated `countAttemptsByPhone` agrees |
+| A3 | `countDistinctRecipientsByIp` returns the correct distinct count; the deprecated `countDistinctPhonesByIp` agrees |
 
 All invariants must pass for the script to exit 0. Any failure exits 1 with a descriptive line.
 

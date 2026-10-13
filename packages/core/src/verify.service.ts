@@ -16,7 +16,7 @@ import {
   CooldownActiveException,
   IpRateLimitedException,
   NoPendingVerificationException,
-  PhoneRateLimitedException,
+  RecipientRateLimitedException,
   SmsDispatchFailedException,
 } from './errors.js';
 import type {
@@ -31,6 +31,9 @@ import {
   hashCode,
 } from './code/code-gen.js';
 import { buildDeliverers, Deliverer, reportsMayHaveSent } from './dispatch.js';
+import { distinctRecipientCounter, DistinctRecipientCounter, pickIndexStore, pickRenamed } from './recipient-names.js';
+import type { RecipientIndexStore } from './interfaces/recipient-index-store.interface.js';
+import type { RateLimitPolicy } from './interfaces/module-options.interface.js';
 import {
   DeliveryKind,
   Recipient,
@@ -76,9 +79,9 @@ const DEFAULTS = {
   ttlSeconds: 600,
   maxAttempts: 5,
   cooldownSeconds: 30,
-  perPhone: { count: 5, windowSeconds: 3600 },
+  perRecipient: { count: 5, windowSeconds: 3600 },
   perIp: { count: 20, windowSeconds: 3600 },
-  maxDistinctPhonesPerIp: 10,
+  maxDistinctRecipientsPerIp: 10,
   velocityWindowSeconds: 300,
   attemptTimeoutMs: 5000,
   totalTimeoutMs: 10000,
@@ -100,6 +103,10 @@ export class VerifyService {
   private readonly attemptTimeoutMs: number;
   private readonly totalTimeoutMs: number;
   private readonly fallbackAfterUncertain: boolean;
+  private readonly recipientIndex: RecipientIndexStore;
+  private readonly perRecipient: RateLimitPolicy;
+  private readonly maxDistinctRecipientsPerIp: number;
+  private readonly countDistinctRecipientsByIp: DistinctRecipientCounter | undefined;
 
   constructor(
     @Inject(VERIFY_MODULE_OPTIONS)
@@ -130,10 +137,23 @@ export class VerifyService {
     if (typeof verify.reserveAttempt !== 'function') {
       throw new Error('stores.verify must implement reserveAttempt (required since 0.8.0).');
     }
-    const phoneIndex = options.stores.phoneIndex as unknown as Record<string, unknown>;
-    if (typeof phoneIndex.deleteIfMatches !== 'function') {
-      throw new Error('stores.phoneIndex must implement deleteIfMatches (required since 0.7.0, #9).');
+    const recipientIndex = pickIndexStore(this.log, options.stores.recipientIndex, options.stores.phoneIndex);
+    if (!recipientIndex) throw new Error('stores.recipientIndex is required.');
+    if (typeof (recipientIndex as unknown as Record<string, unknown>).deleteIfMatches !== 'function') {
+      throw new Error('stores.recipientIndex must implement deleteIfMatches (required since 0.7.0, #9).');
     }
+    this.recipientIndex = recipientIndex;
+    this.perRecipient =
+      pickRenamed(this.log, options.rateLimit?.perRecipient, options.rateLimit?.perPhone, [
+        'rateLimit.perRecipient',
+        'rateLimit.perPhone',
+      ]) ?? DEFAULTS.perRecipient;
+    this.maxDistinctRecipientsPerIp =
+      pickRenamed(this.log, options.abuse?.maxDistinctRecipientsPerIp, options.abuse?.maxDistinctPhonesPerIp, [
+        'abuse.maxDistinctRecipientsPerIp',
+        'abuse.maxDistinctPhonesPerIp',
+      ]) ?? DEFAULTS.maxDistinctRecipientsPerIp;
+    this.countDistinctRecipientsByIp = distinctRecipientCounter(this.log, options.stores.abuse);
     this.metrics = createMetricsRecorder({
       enabled: options.observability?.metrics?.enabled,
       registry: options.observability?.metrics?.registry,
@@ -233,6 +253,8 @@ export class VerifyService {
     const now = new Date();
     const record: VerificationRecord = {
       sid,
+      recipient: phone,
+      // Read by verify stores written before 0.9.0 (#8).
       phone,
       channel,
       codeHash: hashCode(code, salt),
@@ -249,7 +271,7 @@ export class VerifyService {
     // Removes this start's index entry only if it still holds this sid, so it
     // can never remove the entry of a newer verification (#9).
     const deleteOwnIndex = () =>
-      this.tryCleanup('index delete', () => this.options.stores.phoneIndex.deleteIfMatches(phone, sid));
+      this.tryCleanup('index delete', () => this.recipientIndex.deleteIfMatches(phone, sid));
     const deleteOwnRecordAndIndex = async () => {
       await deleteRecord();
       await deleteOwnIndex();
@@ -281,7 +303,7 @@ export class VerifyService {
     await renewClaim(deleteRecord);
     // The entry lives as long as the record, not a full TTL from now.
     const indexTtlSeconds = Math.max(1, Math.ceil((record.expiresAt.getTime() - Date.now()) / 1000));
-    const [, indexErr] = await asyncHandler(this.options.stores.phoneIndex.set(phone, sid, indexTtlSeconds));
+    const [, indexErr] = await asyncHandler(this.recipientIndex.set(phone, sid, indexTtlSeconds));
     if (indexErr) {
       // The write may have been saved before it reported the error.
       await deleteOwnRecordAndIndex();
@@ -293,7 +315,7 @@ export class VerifyService {
     await this.audit({
       type: 'verification_started',
       sid,
-      phoneRedacted: this.redact(phone),
+      recipientRedacted: this.redact(phone),
       ip: params.ip,
       channel,
     });
@@ -324,7 +346,7 @@ export class VerifyService {
     await this.audit({
       type: 'code_dispatched',
       sid,
-      phoneRedacted: this.redact(phone),
+      recipientRedacted: this.redact(phone),
       ip: params.ip,
       channel,
       provider,
@@ -355,7 +377,7 @@ export class VerifyService {
     const phone = recipientFromAddress(params.to).key;
     span.setAttribute(TELEMETRY.ATTR_PHONE_REDACTED, this.redact(phone));
     this.vlog(`check: phone=${this.redact(phone)} ip=${params.ip ?? '-'}`);
-    const sid = await this.options.stores.phoneIndex.get(phone);
+    const sid = await this.recipientIndex.get(phone);
     if (!sid) {
       this.metrics.checksTotal(CHECK_OUTCOME.NoPending);
       this.metrics.checkDuration((Date.now() - checkStart) / 1000);
@@ -431,7 +453,7 @@ export class VerifyService {
       await this.audit({
         type: transitioned ? 'verification_approved' : 'verification_canceled',
         sid,
-        phoneRedacted: this.redact(phone),
+        recipientRedacted: this.redact(phone),
         ip: params.ip,
         channel: record.channel,
         outcome: transitioned ? 'approved' : 'race',
@@ -463,7 +485,7 @@ export class VerifyService {
       await this.audit({
         type: 'verification_canceled',
         sid,
-        phoneRedacted: this.redact(phone),
+        recipientRedacted: this.redact(phone),
         ip: params.ip,
         channel: record.channel,
         outcome: 'locked_out',
@@ -576,6 +598,7 @@ export class VerifyService {
     await this.options.stores.cooldown.start(sent.phone, sent.cooldownSeconds);
     await this.options.stores.abuse?.recordSendAttempt({
       sid: sent.sid,
+      recipient: sent.phone,
       phone: sent.phone,
       ip: sent.ip,
       channel: sent.channel,
@@ -609,10 +632,11 @@ export class VerifyService {
     // Each cleanup step runs even if an earlier one fails, and none of them
     // turns the answer into a 500: the caller still gets the documented 503.
     await this.tryCleanup('verification delete', () => this.options.stores.verify.delete(ctx.sid));
-    await this.tryCleanup('index delete', () => this.options.stores.phoneIndex.deleteIfMatches(ctx.phone, ctx.sid));
+    await this.tryCleanup('index delete', () => this.recipientIndex.deleteIfMatches(ctx.phone, ctx.sid));
     await this.tryCleanup('failure record', async () => {
       await this.options.stores.abuse?.recordSendAttempt({
         sid: ctx.sid,
+        recipient: ctx.phone,
         phone: ctx.phone,
         ip: ctx.ip,
         channel: ctx.channel,
@@ -652,7 +676,7 @@ export class VerifyService {
     this.metrics.startsBlocked(BLOCK_REASON.Cooldown);
     await this.audit({
       type: 'rate_limited',
-      phoneRedacted: this.redact(phone),
+      recipientRedacted: this.redact(phone),
       ip,
       channel,
       outcome: 'cooldown',
@@ -680,7 +704,7 @@ export class VerifyService {
   private async dropIndexEntry(phone: string, sid: string, what: string): Promise<void> {
     // Deferred so a store that throws synchronously is caught too.
     const [, err] = await asyncHandler(
-      Promise.resolve().then(() => this.options.stores.phoneIndex.deleteIfMatches(phone, sid)),
+      Promise.resolve().then(() => this.recipientIndex.deleteIfMatches(phone, sid)),
     );
     if (err) this.log.warn(`check: index cleanup for ${what} did not complete: ${err.message}`);
   }
@@ -700,7 +724,7 @@ export class VerifyService {
     await this.audit({
       type: 'verification_expired',
       sid,
-      phoneRedacted: this.redact(phone),
+      recipientRedacted: this.redact(phone),
       ip,
       channel,
     });
@@ -732,25 +756,25 @@ export class VerifyService {
     ip: string | undefined,
     channel: VerificationChannel,
   ): Promise<void> {
-    const perPhone =
-      this.options.rateLimit?.perPhone ?? DEFAULTS.perPhone;
+    // The key keeps its pre-0.9.0 prefix: renaming it would reset every
+    // recipient's window on upgrade.
     const phoneHit = await this.options.stores.rateLimit.hit(
       `phone:${phone}`,
-      perPhone.count,
-      perPhone.windowSeconds,
+      this.perRecipient.count,
+      this.perRecipient.windowSeconds,
     );
     this.metrics.phoneRateLimitHits();
     if (phoneHit.exceeded) {
       this.metrics.startsBlocked(BLOCK_REASON.PhoneRateLimit);
       await this.audit({
         type: 'rate_limited',
-        phoneRedacted: this.redact(phone),
+        recipientRedacted: this.redact(phone),
         ip,
         channel,
         outcome: 'phone_rate_limit',
         meta: { resetAt: phoneHit.resetAt },
       });
-      throw new PhoneRateLimitedException(phoneHit.resetAt);
+      throw new RecipientRateLimitedException(phoneHit.resetAt);
     }
     if (ip) {
       const perIp = this.options.rateLimit?.perIp ?? DEFAULTS.perIp;
@@ -763,7 +787,7 @@ export class VerifyService {
         this.metrics.startsBlocked(BLOCK_REASON.IpRateLimit);
         await this.audit({
           type: 'rate_limited',
-          phoneRedacted: this.redact(phone),
+          recipientRedacted: this.redact(phone),
           ip,
           channel,
           outcome: 'ip_rate_limit',
@@ -779,22 +803,17 @@ export class VerifyService {
     ip: string | undefined,
     channel: VerificationChannel,
   ): Promise<void> {
-    if (!ip || !this.options.stores.abuse) return;
-    const maxDistinct =
-      this.options.abuse?.maxDistinctPhonesPerIp ??
-      DEFAULTS.maxDistinctPhonesPerIp;
+    if (!ip || !this.countDistinctRecipientsByIp) return;
+    const maxDistinct = this.maxDistinctRecipientsPerIp;
     const windowSeconds =
       this.options.abuse?.velocityWindowSeconds ??
       DEFAULTS.velocityWindowSeconds;
-    const distinct = await this.options.stores.abuse.countDistinctPhonesByIp(
-      ip,
-      windowSeconds * 1000,
-    );
+    const distinct = await this.countDistinctRecipientsByIp(ip, windowSeconds * 1000);
     if (distinct >= maxDistinct) {
       this.metrics.startsBlocked(BLOCK_REASON.Abuse);
       await this.audit({
         type: 'abuse_detected',
-        phoneRedacted: this.redact(phone),
+        recipientRedacted: this.redact(phone),
         ip,
         channel,
         outcome: 'velocity',
@@ -820,7 +839,8 @@ export class VerifyService {
   ): Promise<void> {
     const sink = this.options.stores.audit;
     if (!sink) return;
-    const event = { ts: new Date(), ...partial };
+    // phoneRedacted: the pre-0.9.0 name, read by sinks written before it (#8).
+    const event = { ts: new Date(), ...partial, phoneRedacted: partial.recipientRedacted };
     const [, err] = await asyncHandler(sink.record(event));
     if (err) this.log.warn(`audit sink failed: ${err.message}`);
   }

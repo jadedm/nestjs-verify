@@ -23,7 +23,8 @@ export class LoggerAuditSink implements AuditSink {
     const payload = {
       type: event.type,
       sid: event.sid,
-      phone: event.phoneRedacted,
+      // The log key is renamed with the other telemetry names in #7.
+      phone: event.recipientRedacted,
       ip: event.ip,
       channel: event.channel,
       provider: event.provider,

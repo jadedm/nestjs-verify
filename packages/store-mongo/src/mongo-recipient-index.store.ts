@@ -1,7 +1,7 @@
 import type { PhoneIndexStore } from '@jadedm/nestjs-verify';
 import { Collection, Db, MongoClient, MongoClientOptions } from 'mongodb';
 
-export interface MongoPhoneIndexStoreOptions {
+export interface MongoRecipientIndexStoreOptions {
   uri?: string;
   clientOptions?: MongoClientOptions;
   databaseName?: string;
@@ -15,11 +15,13 @@ interface PhoneIndexDoc {
   expiresAt: Date;
 }
 
-export class MongoPhoneIndexStore implements PhoneIndexStore {
+// Implements the pre-0.9.0 type name: the core range this adapter supports
+// starts before `RecipientIndexStore` existed (#8).
+export class MongoRecipientIndexStore implements PhoneIndexStore {
   private readonly col: Collection<PhoneIndexDoc>;
   private readonly ownedClient?: MongoClient;
 
-  constructor(opts: MongoPhoneIndexStoreOptions) {
+  constructor(opts: MongoRecipientIndexStoreOptions) {
     let db: Db;
     if (opts.db) {
       db = opts.db;
@@ -29,7 +31,7 @@ export class MongoPhoneIndexStore implements PhoneIndexStore {
       db = client.db(opts.databaseName);
     } else {
       throw new Error(
-        'MongoPhoneIndexStore: provide either { uri, databaseName? } or { db }',
+        'MongoRecipientIndexStore: provide either { uri, databaseName? } or { db }',
       );
     }
     this.col = db.collection<PhoneIndexDoc>(
@@ -65,3 +67,10 @@ export class MongoPhoneIndexStore implements PhoneIndexStore {
     await this.ownedClient?.close();
   }
 }
+
+/** @deprecated Renamed to `MongoRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
+export const MongoPhoneIndexStore = MongoRecipientIndexStore;
+/** @deprecated Renamed to `MongoRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
+export type MongoPhoneIndexStore = MongoRecipientIndexStore;
+/** @deprecated Renamed to `MongoRecipientIndexStoreOptions` in 0.9.0 (#8); removed in 1.0. */
+export type MongoPhoneIndexStoreOptions = MongoRecipientIndexStoreOptions;

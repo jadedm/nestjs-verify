@@ -8,7 +8,13 @@ export type VerificationChannel = 'sms' | 'voice' | 'email' | 'whatsapp';
 
 export interface VerificationRecord {
   sid: string;
-  phone: string;
+  /** The recipient's store key: an E.164 phone or a lowercased email. */
+  recipient: string;
+  /**
+   * @deprecated Same value as `recipient`, for stores written before 0.9.0
+   * (#8). Core writes both and reads `recipient` first; removed in 1.0.
+   */
+  phone?: string;
   channel: VerificationChannel;
   codeHash: string;
   salt: string;

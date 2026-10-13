@@ -1,18 +1,20 @@
 import type { PhoneIndexStore } from '@jadedm/nestjs-verify';
 import { Pool, PoolConfig } from 'pg';
 
-export interface PostgresPhoneIndexStoreOptions {
+export interface PostgresRecipientIndexStoreOptions {
   connectionString?: string;
   pool?: Pool;
   poolConfig?: PoolConfig;
   tableName?: string;
 }
 
-export class PostgresPhoneIndexStore implements PhoneIndexStore {
+// Implements the pre-0.9.0 type name: the core range this adapter supports
+// starts before `RecipientIndexStore` existed (#8).
+export class PostgresRecipientIndexStore implements PhoneIndexStore {
   private readonly pool: Pool;
   private readonly table: string;
 
-  constructor(opts: PostgresPhoneIndexStoreOptions) {
+  constructor(opts: PostgresRecipientIndexStoreOptions) {
     if (opts.pool) {
       this.pool = opts.pool;
     } else if (opts.connectionString || opts.poolConfig) {
@@ -21,7 +23,7 @@ export class PostgresPhoneIndexStore implements PhoneIndexStore {
       );
     } else {
       throw new Error(
-        'PostgresPhoneIndexStore: provide one of {connectionString, pool, poolConfig}',
+        'PostgresRecipientIndexStore: provide one of {connectionString, pool, poolConfig}',
       );
     }
     this.table = opts.tableName ?? 'verify_phone_index';
@@ -57,3 +59,10 @@ export class PostgresPhoneIndexStore implements PhoneIndexStore {
     await this.pool.query(`DELETE FROM ${this.table} WHERE phone = $1 AND sid = $2`, [phone, sid]);
   }
 }
+
+/** @deprecated Renamed to `PostgresRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
+export const PostgresPhoneIndexStore = PostgresRecipientIndexStore;
+/** @deprecated Renamed to `PostgresRecipientIndexStore` in 0.9.0 (#8); removed in 1.0. */
+export type PostgresPhoneIndexStore = PostgresRecipientIndexStore;
+/** @deprecated Renamed to `PostgresRecipientIndexStoreOptions` in 0.9.0 (#8); removed in 1.0. */
+export type PostgresPhoneIndexStoreOptions = PostgresRecipientIndexStoreOptions;

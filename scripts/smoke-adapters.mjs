@@ -1,6 +1,6 @@
 /**
  * Adapter smoke. Exercises every store interface (VerifyStore, AbuseStore,
- * RateLimitStore, CooldownStore, PhoneIndexStore) against every backend
+ * RateLimitStore, CooldownStore, RecipientIndexStore) against every backend
  * (Postgres, Mongo, Redis where applicable) and asserts the documented
  * contract that the core interfaces promise.
  *
@@ -47,7 +47,7 @@ function recordFixture(sid, overrides = {}) {
   const now = new Date();
   return {
     sid,
-    phone: '+14155552671',
+    recipient: '+14155552671',
     channel: 'sms',
     codeHash: 'deadbeef',
     salt: 'salt',
@@ -68,6 +68,13 @@ async function exerciseVerifyStore(name, verify) {
   assert(got?.sid === v1.sid && got?.status === 'pending', 'create + get round-trips');
   assert(got?.attempts === 0, 'attempts default 0');
   assert((await verify.get('vr_missing')) === null, 'get returns null for missing sid');
+  assert(got?.recipient === '+14155552671' && got?.phone === '+14155552671', 'get returns the recipient under both names (#8)');
+
+  // A core before 0.9.0 writes `phone` only, a core from 0.9.0 `recipient` (#8).
+  const { recipient: _r, ...oldStyle } = recordFixture(`vr_oldcore_${RUN}`);
+  await verify.create({ ...oldStyle, phone: '+14155550100' });
+  const gotOld = await verify.get(oldStyle.sid);
+  assert(gotOld?.recipient === '+14155550100' && gotOld?.phone === '+14155550100', 'a record written with phone only reads back under both names');
 
   const r1 = await verify.incrementAttempts(v1.sid);
   assert(r1.outcome === 'incremented', 'first increment -> incremented');
@@ -132,13 +139,17 @@ async function exerciseVerifyStore(name, verify) {
 
 async function exerciseAbuseStore(name, abuse) {
   console.log(`\n--- ${name} AbuseStore ---`);
-  await abuse.recordSendAttempt({ sid: 'a1', phone: '+15555550001', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
+  // a2 is written as a core before 0.9.0 writes it, with `phone` only (#8).
+  await abuse.recordSendAttempt({ sid: 'a1', recipient: '+15555550001', phone: '+15555550001', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
   await abuse.recordSendAttempt({ sid: 'a2', phone: '+15555550002', ip: '203.0.113.5', channel: 'sms', provider: 'mock', success: true });
-  await abuse.recordSendAttempt({ sid: 'a3', phone: '+15555550001', ip: '203.0.113.6', channel: 'sms', provider: 'mock', success: false });
+  await abuse.recordSendAttempt({ sid: 'a3', recipient: '+15555550001', ip: '203.0.113.6', channel: 'sms', provider: 'mock', success: false });
 
   assert((await abuse.countAttemptsByIp('203.0.113.5', 60_000)) === 2, 'countAttemptsByIp returns 2');
-  assert((await abuse.countAttemptsByPhone('+15555550001', 60_000)) === 2, 'countAttemptsByPhone returns 2');
-  assert((await abuse.countDistinctPhonesByIp('203.0.113.5', 60_000)) === 2, 'countDistinctPhonesByIp returns 2');
+  assert((await abuse.countAttemptsByRecipient('+15555550001', 60_000)) === 2, 'countAttemptsByRecipient returns 2');
+  assert((await abuse.countAttemptsByRecipient('+15555550002', 60_000)) === 1, 'a send recorded with phone only is counted by recipient');
+  assert((await abuse.countDistinctRecipientsByIp('203.0.113.5', 60_000)) === 2, 'countDistinctRecipientsByIp returns 2');
+  assert((await abuse.countAttemptsByPhone('+15555550001', 60_000)) === 2, 'the deprecated countAttemptsByPhone gives the same answer');
+  assert((await abuse.countDistinctPhonesByIp('203.0.113.5', 60_000)) === 2, 'the deprecated countDistinctPhonesByIp gives the same answer');
 }
 
 async function exerciseRateLimitStore(name, rateLimit) {
@@ -190,8 +201,17 @@ async function exerciseCooldownStore(name, cooldown) {
   assert((await cooldown.claim(k('expiry'), 60, 'b')) === 0, 'an expired claim can be taken');
 }
 
-async function exercisePhoneIndexStore(name, phoneIndex) {
-  console.log(`\n--- ${name} PhoneIndexStore ---`);
+async function exerciseRecipientIndexStore(name, stores) {
+  console.log(`\n--- ${name} RecipientIndexStore ---`);
+  assert(stores.recipientIndex && stores.phoneIndex === stores.recipientIndex, 'the factory returns one index store under both names (#8)');
+  assert(!Object.keys(stores).includes('phoneIndex'), 'the old name is not enumerable, so a spread of the factory output leaves it out (#8)');
+  const original = stores.recipientIndex;
+  const stand_in = { set: async () => {}, get: async () => null, delete: async () => {}, deleteIfMatches: async () => {} };
+  stores.phoneIndex = stand_in;
+  assert(stores.recipientIndex === stand_in, 'setting the old name in place sets the new one (#8)');
+  stores.recipientIndex = original;
+  assert(stores.phoneIndex === original, 'setting the new name in place is what the old name reads (#8)');
+  const phoneIndex = stores.recipientIndex;
   await phoneIndex.set(`idx:${name}:+91`, 'vr_x', 60);
   assert((await phoneIndex.get(`idx:${name}:+91`)) === 'vr_x', 'set/get round trip');
   await phoneIndex.delete(`idx:${name}:+91`);
@@ -214,7 +234,8 @@ async function exerciseAuditSink(name, audit) {
   await audit.record({
     type: 'verification_started',
     sid: `audit_${name}_1`,
-    phoneRedacted: '+91***10',
+    // The new name only; Postgres keeps it in a NOT NULL column (#8).
+    recipientRedacted: '+91***10',
     ip: '203.0.113.7',
     channel: 'sms',
     ts,
@@ -222,6 +243,7 @@ async function exerciseAuditSink(name, audit) {
   await audit.record({
     type: 'code_dispatched',
     sid: `audit_${name}_1`,
+    // As a core before 0.9.0 sends it, with phoneRedacted only (#8).
     phoneRedacted: '+91***10',
     ip: '203.0.113.7',
     channel: 'sms',
@@ -343,7 +365,7 @@ async function smokePostgres() {
   await exerciseAbuseStore('Postgres', pg.abuse);
   await exerciseRateLimitStore('Postgres', pg.rateLimit);
   await exerciseCooldownStore('Postgres', pg.cooldown);
-  await exercisePhoneIndexStore('Postgres', pg.phoneIndex);
+  await exerciseRecipientIndexStore('Postgres', pg);
   await exerciseAuditSink('Postgres', pg.audit);
   await exerciseEmailFlow('Postgres', pg);
   await exerciseServerClockExpiry('Postgres', pg);
@@ -360,7 +382,7 @@ async function smokeMongo() {
   await exerciseAbuseStore('Mongo', mg.abuse);
   await exerciseRateLimitStore('Mongo', mg.rateLimit);
   await exerciseCooldownStore('Mongo', mg.cooldown);
-  await exercisePhoneIndexStore('Mongo', mg.phoneIndex);
+  await exerciseRecipientIndexStore('Mongo', mg);
   await exerciseAuditSink('Mongo', mg.audit);
   await exerciseEmailFlow('Mongo', mg);
   await mg.close?.();
@@ -377,7 +399,7 @@ async function smokeRedis() {
   const r = createRedisStores({ client });
   await exerciseRateLimitStore('Redis', r.rateLimit);
   await exerciseCooldownStore('Redis', r.cooldown);
-  await exercisePhoneIndexStore('Redis', r.phoneIndex);
+  await exerciseRecipientIndexStore('Redis', r);
   await exerciseEmailFlow('Redis', { ...r, verify: new MemoryVerifyStore() });
   await client.quit();
 }

@@ -84,14 +84,14 @@ Core (`packages/core/src`):
   logged and never fail a verification.
 
 Five store interfaces in `packages/core/src/interfaces`: `VerifyStore`, `AbuseStore` (optional),
-`RateLimitStore`, `CooldownStore`, `PhoneIndexStore`, plus an optional `AuditSink`. Core ships
+`RateLimitStore`, `CooldownStore`, `RecipientIndexStore` (`PhoneIndexStore` before 0.9.0), plus an optional `AuditSink`. Core ships
 in-memory versions (`createMemoryStores()`). Each backend package exposes a `create*Stores` factory:
 
 - Postgres and Mongo implement all five plus an audit sink. Their `create*Stores` factory runs
   versioned migrations (`migrations.ts`, `migration-runner.ts`); with `skipSchemaSetup: true` it only
   checks the schema version. Postgres takes an advisory lock and records versions in
   `verify_schema_versions`. A schema change is a new migration entry, never an edit to an old one.
-- Redis implements only the three short-lived stores (rate limit, cooldown, phone index) and must be
+- Redis implements only the three short-lived stores (rate limit, cooldown, recipient index) and must be
   paired with a durable verify store.
 
 Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `SmsProvider` or
@@ -107,13 +107,20 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
   `incrementAttempts` remains on the shipped stores, deprecated, and is no longer in the interface.
 - `markStatus` only transitions out of `pending` and returns false if the record was no longer pending.
 - `CooldownStore.claim` decides the holder in one atomic operation and renews for the same holder;
-  `release` and `PhoneIndexStore.deleteIfMatches` remove only what the given holder or sid still owns
+  `release` and `RecipientIndexStore.deleteIfMatches` remove only what the given holder or sid still owns
   (#13, #9). The service never deletes an index entry with the unconditional `delete`.
 - `scripts/smoke-adapters.mjs` encodes these invariants; a new adapter or store method gets cases
   there.
 - Adapters import from the `@jadedm/nestjs-verify` entry point only, never core internals, and almost
   only types. The exception is `provider-gupshup`, which imports `asyncHandler` as a value. Core is a peer
   dependency of each adapter, bounded to the core minors it is known to work with (Releases, below).
+  An adapter names only core types that exist at its range's floor: the index stores implement
+  `PhoneIndexStore`, not `RecipientIndexStore`, and the Postgres and Mongo stores inline core's
+  `ReserveResult`.
+- Phone names renamed to recipient names in 0.9.0 (#8) keep working until 1.0 in both directions:
+  core writes `recipient` and `phone` and falls back to the old store method names; the 0.9 adapters
+  accept either field on write and return both on read, so they still run under a 0.8 core. The
+  database keeps `phone` columns and fields.
 
 ## Build rules
 
@@ -160,7 +167,7 @@ agent's shell) the publish fails with `EOTP`, so hand the command over. Every ve
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
 
-Each adapter's core peer range names the core versions it works with: `workspace:>=0.6.8 <0.7.0`
+Each adapter's core peer range names the core versions it works with: `workspace:>=0.6.8 <0.10.0`
 today. Changesets bumps a package at major when a release leaves its peer range, and in 0.x that is
 1.0.0; for core, twilio, postgres and ses the linked group then carries the others with it (#10). So
 the PR that adds a core `minor` changeset also widens the range (`<0.8.0`) of every adapter that works

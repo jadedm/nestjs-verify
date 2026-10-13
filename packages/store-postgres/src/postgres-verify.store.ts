@@ -70,7 +70,8 @@ export class PostgresVerifyStore implements VerifyStore {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         v.sid,
-        v.phone,
+        // A core before 0.9.0 sets only `phone` (#8); the column keeps its name.
+        v.recipient ?? v.phone,
         v.channel,
         v.codeHash,
         v.salt,
@@ -163,6 +164,8 @@ export class PostgresVerifyStore implements VerifyStore {
   private fromRow(r: Row): VerificationRecord {
     return {
       sid: r.sid,
+      recipient: r.phone,
+      // For a core before 0.9.0, which reads `phone` (#8).
       phone: r.phone,
       channel: r.channel as VerificationRecord['channel'],
       codeHash: r.code_hash,

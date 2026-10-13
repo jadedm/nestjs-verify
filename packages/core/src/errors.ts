@@ -18,13 +18,23 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 export const VerifyErrorCode = {
   /** Phone fails E.164 validation. HTTP 400. */
   InvalidPhone: 'INVALID_PHONE',
-  /** Per-phone cooldown is active. HTTP 429. Response includes retryAfterMs. */
+  /** Per-recipient cooldown is active. HTTP 429. Response includes retryAfterMs. */
   CooldownActive: 'COOLDOWN_ACTIVE',
-  /** Too many sends for this phone in the current window. HTTP 429. */
-  PhoneRateLimited: 'PHONE_RATE_LIMITED',
+  /**
+   * Too many sends for this recipient (phone or email) in the current window.
+   * HTTP 429. Before 0.9.0 the code was PHONE_RATE_LIMITED (#8).
+   */
+  RecipientRateLimited: 'RECIPIENT_RATE_LIMITED',
+  /**
+   * @deprecated Renamed to `RecipientRateLimited` in 0.9.0, and its value
+   * changed with it: code that compares against this constant keeps working,
+   * code that compares against the string 'PHONE_RATE_LIMITED' does not.
+   * Removed in 1.0.
+   */
+  PhoneRateLimited: 'RECIPIENT_RATE_LIMITED',
   /** Too many sends from this IP. HTTP 429. */
   IpRateLimited: 'IP_RATE_LIMITED',
-  /** IP is touching too many distinct phones (velocity heuristic). HTTP 429. */
+  /** IP is touching too many distinct recipients (velocity heuristic). HTTP 429. */
   AbuseVelocity: 'ABUSE_VELOCITY',
   /**
    * The code could not be sent, or recording the send failed (SMS or email).
@@ -32,7 +42,7 @@ export const VerifyErrorCode = {
    * cooldown was started.
    */
   SmsDispatchFailed: 'SMS_DISPATCH_FAILED',
-  /** No active verification for this phone (on check). HTTP 400. */
+  /** No active verification for this recipient (on check). HTTP 400. */
   NoPendingVerification: 'NO_PENDING_VERIFICATION',
   /** Verification expired before check. HTTP 400. */
   CodeExpired: 'CODE_EXPIRED',
@@ -95,16 +105,21 @@ export class CooldownActiveException extends VerifyException {
   }
 }
 
-export class PhoneRateLimitedException extends VerifyException {
+export class RecipientRateLimitedException extends VerifyException {
   constructor(resetAt: number) {
     super(
-      VerifyErrorCode.PhoneRateLimited,
-      'Too many verification requests for this number.',
+      VerifyErrorCode.RecipientRateLimited,
+      'Too many verification requests for this recipient.',
       HttpStatus.TOO_MANY_REQUESTS,
       { resetAt },
     );
   }
 }
+
+/** @deprecated Renamed to `RecipientRateLimitedException` in 0.9.0; removed in 1.0. */
+export const PhoneRateLimitedException = RecipientRateLimitedException;
+/** @deprecated Renamed to `RecipientRateLimitedException` in 0.9.0; removed in 1.0. */
+export type PhoneRateLimitedException = RecipientRateLimitedException;
 
 export class IpRateLimitedException extends VerifyException {
   constructor(resetAt: number) {

@@ -10,13 +10,13 @@ describe('MemoryAuditSink', () => {
   it('appends events in order', async () => {
     await sink.record({
       type: 'verification_started',
-      phoneRedacted: '+91***10',
+      recipientRedacted: '+91***10',
       channel: 'sms',
       ts: new Date(0),
     });
     await sink.record({
       type: 'code_dispatched',
-      phoneRedacted: '+91***10',
+      recipientRedacted: '+91***10',
       channel: 'sms',
       provider: 'mock',
       ts: new Date(1000),
@@ -29,7 +29,7 @@ describe('MemoryAuditSink', () => {
   it('clear empties the buffer', async () => {
     await sink.record({
       type: 'verification_started',
-      phoneRedacted: '+91***10',
+      recipientRedacted: '+91***10',
       channel: 'sms',
       ts: new Date(),
     });

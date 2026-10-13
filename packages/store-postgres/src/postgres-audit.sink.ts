@@ -40,7 +40,8 @@ export class PostgresAuditSink implements AuditSink {
       [
         event.type,
         event.sid ?? null,
-        event.phoneRedacted,
+        // A core before 0.9.0 sets only `phoneRedacted` (#8).
+        event.recipientRedacted ?? event.phoneRedacted,
         event.ip ?? null,
         event.channel,
         event.provider ?? null,

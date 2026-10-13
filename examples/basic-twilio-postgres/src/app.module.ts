@@ -22,7 +22,7 @@ import { createPostgresStores } from '@jadedm/nestjs-verify-postgres';
           code: { length: 6, ttlSeconds: 600 },
           attempts: { max: 5, cooldownSeconds: 30 },
           rateLimit: {
-            perPhone: { count: 5, windowSeconds: 3600 },
+            perRecipient: { count: 5, windowSeconds: 3600 },
             perIp: { count: 20, windowSeconds: 3600 },
           },
         };
