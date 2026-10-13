@@ -24,8 +24,9 @@
 // TAG_RELEASES_WAIT_SECONDS (default 600) it stops with nothing tagged and
 // names what npm still lacks. It then refuses to finish unless each of those
 // versions is tagged and released (a prerelease is only tagged). A version
-// that npm's `latest` has already passed will never be latest, so it is
-// waited for until listed and then only tagged, like a prerelease (#113).
+// that npm's stable `latest` has already passed is not waited for as latest:
+// it is waited for until listed, then tagged without a release (#113). A
+// later run from a checkout at that version skips it again the same way.
 //
 // Usage: node scripts/tag-releases.mjs [--dry-run] [--after-publish]
 import { execFileSync } from 'node:child_process';
@@ -94,21 +95,24 @@ const unfinished = ({ pkg }) => {
 };
 const awaited = afterPublish ? packages.filter(unfinished) : [];
 
-// Versions npm lists with a higher `latest`: tagged, never released.
+// Versions npm lists with a higher `latest`: tagged, never released. Rebuilt
+// on every poll, so it holds what the last poll saw, not any earlier one.
 const passed = new Set();
-const notYetOnNpm = () =>
-  awaited.flatMap(({ pkg }) => {
+const notYetOnNpm = () => {
+  passed.clear();
+  return awaited.flatMap(({ pkg }) => {
     const view = npmView(pkg.name);
     const versions = [view.versions].flat();
     const latest = view['dist-tags']?.latest;
     if (!versions.includes(pkg.version)) return [`${pkg.name}@${pkg.version} (not listed)`];
     if (pkg.version.includes('-') || latest === pkg.version) return [];
-    if (semver.valid(latest) && semver.gt(latest, pkg.version)) {
+    if (semver.valid(latest) && !semver.prerelease(latest) && semver.gt(latest, pkg.version)) {
       passed.add(`${pkg.name}@${pkg.version}`);
       return [];
     }
     return [`${pkg.name}@${pkg.version} (latest is still ${latest})`];
   });
+};
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -127,7 +131,6 @@ if (afterPublish) {
     sleep(pollMs);
     missing = notYetOnNpm();
   }
-  for (const tag of passed) console.log(`tag-releases: ${tag} is listed but npm's latest is already higher; tagging it without a release`);
   if (missing.length > 0) {
     console.error(
       `tag-releases: stopped after ${waitSeconds}s, nothing tagged or released; npm does not show:\n- ${missing.join('\n- ')}\n` +
@@ -135,6 +138,7 @@ if (afterPublish) {
     );
     process.exit(1);
   }
+  for (const tag of passed) console.log(`tag-releases: ${tag} is listed but npm's latest is already higher; tagging it without a release`);
 }
 
 // The oldest commit on main's own line (first parent: a branch merged without
