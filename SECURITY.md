@@ -20,9 +20,7 @@ You should expect an acknowledgement within 5 business days. If you do not hear 
 
 ## Supported versions
 
-This project is pre-1.0. Each package versions on its own, and only the latest minor release of each package receives security fixes; npm shows the current version (`npm view @jadedm/nestjs-verify version`). A fix ships as a new release of the affected packages, and the advisory names the first fixed versions.
-
-When a 1.0.0 release is cut, this policy will be revisited to add a longer support window for the most recent major version.
+The latest 1.x minor of each package receives security fixes, as a patch or minor release; npm shows the current version (`npm view @jadedm/nestjs-verify version`). The advisory names the first fixed versions. 0.x versions receive no fixes; upgrade to 1.x.
 
 ## Disclosure timeline
 

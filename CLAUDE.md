@@ -137,8 +137,9 @@ Providers (`provider-twilio`, `provider-gupshup`, `provider-ses`) implement `Sms
 ## Releases
 
 Changesets. A user-facing change (runtime behaviour, public API, types, dependencies, documented
-behaviour) needs a `pnpm changeset` file; internal-only changes do not. Pre-1.0, a `minor` bump means
-breaking.
+behaviour) needs a `pnpm changeset` file; internal-only changes do not. Since 1.0.0 (13 Oct 2026,
+#125) this is semver: a breaking change waits for 2.0, a minor adds, a patch fixes. Before 1.0 a
+`minor` meant breaking.
 
 Release path, `.github/workflows/release.yml`, on every push to `main`:
 - With pending changesets, `changesets/action` runs `pnpm changeset version` and opens or updates a
@@ -171,24 +172,25 @@ agent's shell) the publish fails with `EOTP`, so hand the command over. Every ve
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
 
-Each adapter's core peer range names the core versions it works with: `workspace:>=0.9.0 <0.10.0`
-for the store adapters and `workspace:>=0.6.8 <0.10.0` for the providers today (#125 moves both to `^1.0.0`). Changesets bumps a package at major when a release leaves its peer range, and in 0.x that is
-1.0.0; for core, twilio, postgres and ses the linked group then carries the others with it (#10). So
-the PR that adds a core `minor` changeset also widens the range (`<0.8.0`) of every adapter that works
-with the new core, with a changeset for each so npm gets the new range, and an adapter that needs code
-changes gets them in that release. Changesets leaves a range alone while releases stay inside it, so raise
-the lower bound by hand when an adapter starts relying on something newer in core; CI's `packed`
+Each adapter's core peer range names the core versions it works with: `workspace:>=0.9.0 <2.0.0` for
+all six since 1.0 (#125), so a 1.x core minor stays inside it and releases no adapter. Changesets bumps
+a package at major when a release leaves its peer range; for core, twilio, postgres and ses the linked
+group then carries the others with it (#10). Before 1.0 the ranges ended at the next 0.x minor, so the
+PR adding a core minor widened them and released each adapter. Changesets leaves a range alone while
+releases stay inside it, so raise the lower bound by hand when an adapter starts relying on something
+newer in core, with a changeset for that adapter; CI's `packed`
 entries with `--core floor` install the lowest published core each adapter's range admits and fail if an
 adapter imports a value or a public type that core lacks (#76). They cannot see a dependency on newer
 core behaviour, or on a type used only inside an adapter; raising the bound for those is a review call. Because core,
 twilio, postgres and ses share one version line, a minor on one of those three without core would
-put core's next patch on that minor. The check refuses it while the ranges exclude that minor; once
-they admit it, core's next release counts as a new minor and must release the adapters with it. The experimental
+put core's next patch on that minor. The check refuses it while the ranges exclude that minor. The experimental
 `onlyUpdatePeerDependentsWhenOutOfRange` flag in `.changeset/config.json` keeps an adapter unbumped
 while core stays inside its range; without it every core minor or major bumps every adapter at major
-(patches never do). `pnpm check:release-plan` (CI build job) fails if the pending changesets plan
-anything at 1.0.0, naming the ranges to widen, or move core to a new minor without releasing every
-adapter whose range admits it; probe changesets check the flag.
+(patches never do). `pnpm check:release-plan` (CI build job) fails if the pending changesets carry any
+package to a new major by accident, naming the ranges to widen, or move core to a new minor that an
+adapter's workspace range admits but the range of its version on npm does not, unless that adapter
+is released too (only then does it ask npm, and an unreachable registry fails it); probe changesets check the flag. The one accepted major
+is a coordinated one: a `major` changeset for every public package, all to the same X.0.0, as 1.0 did.
 
 The `linked` group in `.changeset/config.json` lists only core, twilio, postgres and ses. Gupshup,
 mongo and redis version on their own.

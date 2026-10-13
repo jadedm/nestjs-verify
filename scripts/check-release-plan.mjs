@@ -1,20 +1,23 @@
 #!/usr/bin/env node
-// Fails if Changesets would release any package at 1.0.0 or above (#10).
+// Fails if Changesets would carry any package to a new major by accident
+// (#10): in 0.x that meant 1.0.0, and after 1.0 it means 2.0.0. A major is
+// accepted only as a deliberate, coordinated one: every public package has a
+// pending `major` changeset and all land on the same X.0.0 (1.0 did, #125).
 //
-// Each adapter declares core as a peer, bounded to the core minors it works
-// with (`>=0.6.8 <0.7.0`). Changesets bumps a package at major when a release
-// leaves its peer range, which in 0.x is 1.0.0, and the linked group then
-// carries core, twilio, postgres and ses there with it. The PR that adds a
-// core minor therefore widens the ranges of the adapters that work with it,
-// and releases each of them so the widened range reaches npm.
+// Each adapter declares core as a peer, bounded to the core versions it works
+// with (`>=0.9.0 <2.0.0` since 1.0; before it, one 0.x minor at a time).
+// Changesets bumps a package at major when a release leaves its peer range,
+// and the linked group then carries core, twilio, postgres and ses there with
+// it.
 //
 // Two checks, both computed with the libraries @changesets/cli itself uses:
 // - the pending changesets in .changeset/ as they are, which catches a core
-//   minor whose adapter ranges were not widened, and a widened adapter that is
-//   not released (npm would keep its old range and refuse the new core);
+//   release outside an adapter range, and a new core minor that an adapter's
+//   version on npm refuses while that adapter is not released with it;
 // - probe changesets that exist only in memory, which catch the config:
 //   without onlyUpdatePeerDependentsWhenOutOfRange, every core minor bumps
 //   every adapter at major even inside its range.
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -60,7 +63,8 @@ const planFor = (changesets, pkgs, pre) =>
       .releases.filter((r) => r.type !== 'none')
       .map((r) => [r.name, r.newVersion]),
   );
-const atOneOrAbove = (plan) => Object.keys(plan).filter((name) => semver.major(plan[name]) >= 1);
+const newMajor = (plan) => Object.keys(plan).filter((name) => semver.major(plan[name]) > semver.major(versionOf(name)));
+const publicNames = packages.packages.filter((p) => !p.packageJson.private).map((p) => p.packageJson.name);
 const show = (plan) => Object.entries(plan).map(([n, v]) => `${n.replace('@jadedm/', '')}@${v}`).join(', ') || '(nothing)';
 
 // Adapters whose core peer range does not admit `coreVersion`.
@@ -94,7 +98,17 @@ const failures = [];
 // 1. What the pending changesets would release.
 const pending = await readChangesets(root);
 const pendingPlan = planFor(pending, packages, preState);
-const pendingTooHigh = atOneOrAbove(pendingPlan);
+// The one accepted major: asked for explicitly on every public package, all
+// landing on the same X.0.0.
+const askedMajor = (name) => pending.some((cs) => cs.releases.some((r) => r.name === name && r.type === 'major'));
+const coordinatedMajor =
+  publicNames.every(askedMajor) &&
+  publicNames.every((n) => pendingPlan[n]) &&
+  new Set(publicNames.map((n) => pendingPlan[n])).size === 1 &&
+  semver.minor(pendingPlan[publicNames[0]]) === 0 &&
+  semver.patch(pendingPlan[publicNames[0]]) === 0;
+if (coordinatedMajor) console.log(`ok    coordinated major: every package to ${pendingPlan[publicNames[0]]}`);
+const pendingTooHigh = coordinatedMajor ? [] : newMajor(pendingPlan);
 // When the cascade has already carried core to 1.0.0, name the 0.x minor the
 // changesets asked for, which is the version the ranges need to admit.
 const coreAsked = (v) => (v && semver.major(v) > semver.major(versionOf(CORE)) ? semver.inc(versionOf(CORE), 'minor') : v);
@@ -109,7 +123,7 @@ if (pendingTooHigh.length > 0) {
   const hint = toWiden.length && !coreMajorAsked
     ? ` Core goes to ${coreNext}, outside the core peer range of: ${toWiden.map((a) => `${a.name} (${a.range})`).join(', ')}. Widen each range that works with core ${coreNext} and add a changeset for it.`
     : '';
-  failures.push(`pending changesets plan ${pendingTooHigh.join(', ')} at 1.0.0 or above.${hint}`);
+  failures.push(`pending changesets plan ${pendingTooHigh.join(', ')} at a new major.${hint} A deliberate major needs a major changeset for every package, all to one X.0.0.`);
 }
 
 // Core's linked group shares one version line: releasing twilio, postgres or
@@ -140,24 +154,42 @@ const coreCandidates = pendingPlan[CORE]
       },
     ];
 const stranded = pendingTooHigh.length === 0 ? coreCandidates.find((c) => outOfRange(c.version).length > 0) : undefined;
+// (A coordinated major is still checked here: every adapter range must admit
+// the new core, or npm would refuse the pair.)
 if (stranded) {
   const strandedBy = outOfRange(stranded.version);
   console.log(`FAIL  pending: core ${stranded.version}${stranded.via} is outside the range of ${strandedBy.map((a) => a.name).join(', ')}`);
   failures.push(`core would release as ${stranded.version}${stranded.via}, outside the core peer range of ${strandedBy.map((a) => `${a.name} (${a.range})`).join(', ')}. ${stranded.fix}`);
 }
 
-// A core release into a new minor needs every adapter that admits it released
-// too: the adapter versions on npm still carry the previous range.
-const newCoreMinor = pendingPlan[CORE] && semver.minor(pendingPlan[CORE]) !== semver.minor(versionOf(CORE)) && pendingTooHigh.length === 0;
+// A core release into a new minor needs released with it every adapter that
+// works with it (its workspace range admits the new core) but whose version on
+// npm carries a range that does not. Since 1.0 the ranges end at the next
+// major, so a 1.x core minor normally needs no adapter release. npm is asked
+// only for a new core minor; a failed lookup fails the check, except a version
+// npm has never seen, which publishes with its workspace range.
+const newCoreMinor =
+  !coordinatedMajor && pendingPlan[CORE] && semver.minor(pendingPlan[CORE]) !== semver.minor(versionOf(CORE)) && pendingTooHigh.length === 0;
+const npmCoreRange = (name, version, workspaceRange) => {
+  const view = spawnSync('npm', ['view', `${name}@${version}`, 'peerDependencies', '--json'], { encoding: 'utf8', timeout: 60_000 });
+  const unpublished = view.status !== 0 && /"code":\s*"E404"/.test(view.stdout);
+  if (unpublished) return workspaceRange;
+  if (view.status !== 0) throw new Error(`npm view ${name}@${version} peerDependencies failed: ${(view.stdout + view.stderr).trim().split('\n').slice(-3).join(' ')}`);
+  const range = JSON.parse(view.stdout || '{}')[CORE];
+  if (!range) throw new Error(`npm lists ${name}@${version} with no ${CORE} peer range`);
+  return range;
+};
 const notReleased = newCoreMinor
   ? packages.packages
       .filter((p) => p.packageJson.peerDependencies?.[CORE] && !pendingPlan[p.packageJson.name])
-      .filter((p) => semver.satisfies(pendingPlan[CORE], p.packageJson.peerDependencies[CORE].replace(/^workspace:/, '')))
-      .map((p) => p.packageJson.name)
+      .map((p) => ({ name: p.packageJson.name, version: p.packageJson.version, range: p.packageJson.peerDependencies[CORE].replace(/^workspace:/, '') }))
+      .filter((a) => semver.satisfies(pendingPlan[CORE], a.range))
+      .map((a) => ({ ...a, onNpm: npmCoreRange(a.name, a.version, a.range) }))
+      .filter((a) => !semver.satisfies(pendingPlan[CORE], a.onNpm))
   : [];
+if (newCoreMinor) console.log(`${notReleased.length ? 'FAIL' : 'ok  '}  core ${pendingPlan[CORE]} against the adapter ranges on npm`);
 if (notReleased.length > 0) {
-  console.log(`FAIL  pending: core ${pendingPlan[CORE]} without releasing ${notReleased.join(', ')}`);
-  failures.push(`core goes to ${pendingPlan[CORE]} but ${notReleased.join(', ')} admit it and have no pending changeset; their versions on npm still exclude it. Add a changeset for each.`);
+  failures.push(`core goes to ${pendingPlan[CORE]}, which ${notReleased.map((a) => a.name).join(', ')} admit in the workspace but not on npm (${notReleased.map((a) => `${a.version}: ${a.onNpm}`).join(', ')}), and they have no pending changeset. Add a changeset for each.`);
 }
 
 // 2. Probes: what a core release does to the adapters, given the config.
@@ -165,14 +197,15 @@ const probe = (name, releases, pkgs, expect) => {
   const changeset = { id: 'release-plan-probe', summary: name, releases: Object.entries(releases).map(([n, type]) => ({ name: n, type })) };
   const plan = planFor([changeset], pkgs, undefined);
   const same = JSON.stringify(Object.keys(plan).sort()) === JSON.stringify([...expect].sort());
-  const tooHigh = atOneOrAbove(plan);
+  const tooHigh = newMajor(plan);
   console.log(`${same && tooHigh.length === 0 ? 'ok  ' : 'FAIL'}  probe ${name}: ${show(plan)}`);
-  if (tooHigh.length > 0) failures.push(`probe ${name}: plans ${tooHigh.join(', ')} at 1.0.0 or above`);
+  if (tooHigh.length > 0) failures.push(`probe ${name}: plans ${tooHigh.join(', ')} at a new major`);
   if (!same) failures.push(`probe ${name}: expected releases of ${[...expect].join(', ')}, planned ${show(plan)}`);
 };
 // Core's next minor follows the highest version in its linked group.
 const nextMinor = semver.inc(highest(linkedWith(CORE).map(versionOf)), 'minor');
 probe('core patch', { [CORE]: 'patch' }, packages, [CORE]);
+probe('core minor inside the ranges as they are', { [CORE]: 'minor' }, packages, [CORE]);
 probe('core minor, adapter ranges widened', { [CORE]: 'minor' }, widenedTo(nextMinor), [CORE]);
 probe('core minor + postgres minor, ranges widened', { [CORE]: 'minor', [POSTGRES]: 'minor' }, widenedTo(nextMinor), [CORE, POSTGRES]);
 probe('mongo minor alone', { [MONGO]: 'minor' }, packages, [MONGO]);

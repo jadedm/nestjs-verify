@@ -157,7 +157,7 @@ Twilio Verify costs about $0.05 per verification on top of SMS. At scale that ad
 
 ## Maturity and limitations
 
-This library is in beta. It includes secure primitives but is not yet hardened for enterprise compliance environments. Read this section before adopting it.
+This is 1.0: every exported interface and type stays compatible through 1.x, and a breaking change waits for 2.0. It includes secure primitives but is not yet hardened for enterprise compliance environments. Read this section before adopting it.
 
 ### What is in place
 
@@ -177,15 +177,11 @@ This library is in beta. It includes secure primitives but is not yet hardened f
 * Phone-number redaction in this library's own log lines.
 * Store adapters tested against live Postgres, Mongo and Redis in CI, the Mongo stores under mongodb 5 and 6.
 
-### Before 1.0
+### Supported
 
-The plan to 1.0 is tracked in [#89](https://github.com/jadedm/nestjs-verify/issues/89). 1.0 adds no new features: it is the fixes and breaking renames below, then a frozen public interface.
+Node 22.12 or newer. `@nestjs/common` and `@nestjs/core` 11 or 12. A new Node or Nest major is added in a 1.x minor; dropping one waits for 2.0.
 
-1. Store and policy names ([#8](https://github.com/jadedm/nestjs-verify/issues/8)) and metric and telemetry names ([#7](https://github.com/jadedm/nestjs-verify/issues/7)) were renamed from phone to recipient in 0.9.0, and metrics gained a `channel` label. The old names are removed in 1.0.
-2. Fixed in 0.9.0: a recipient-index write stalled for longer than the cooldown claim could replace a newer verification's entry ([#82](https://github.com/jadedm/nestjs-verify/issues/82)). Index writes are now ordered by the record's `createdAt`. A newer start is created at least `cooldownSeconds` after the older one (and a full claim window, the larger of `cooldownSeconds` and the delivery time limit plus 30 seconds, after an older start that stalled), so only app servers whose clocks differ by more than that could misorder them. With `cooldownSeconds: 0` there is no cooldown or claim, and ordering rests on the clocks alone.
-3. Fixed in 0.9.0: a code's deadline was set by the app server's clock and judged by both that clock and the database's, so steady skew shortened the effective TTL ([#108](https://github.com/jadedm/nestjs-verify/issues/108)). The Postgres and Mongo stores now set the deadline from the database clock that judges it, and the start response carries that deadline.
-
-### After 1.0
+### Not in 1.0
 
 These are not in 1.0. Plan deployments as if they are absent. Additive features are planned for 1.x minors; a change that breaks existing stores or data waits for 2.0.
 
