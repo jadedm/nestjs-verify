@@ -20,7 +20,7 @@
     "check:exports": "node scripts/check-exports.mjs",
     "check:packed": "node scripts/check-packed.mjs",
     "check:release-plan": "node scripts/check-release-plan.mjs",
-    "lint": "pnpm -r run lint",
+    "lint": "pnpm -r --if-present run lint",
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "changeset": "changeset",
     "version": "changeset version",

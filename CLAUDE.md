@@ -36,8 +36,8 @@ The CI gate (`.github/workflows/ci.yml`) is build, typecheck, test, plus a separ
 job. Build comes first because adapters resolve `@jadedm/nestjs-verify` types through its
 `dist/index.d.ts`; a stale or missing core `dist` gives wrong typecheck results in the adapters.
 
-`pnpm lint` exists at the root but no package defines a `lint` script, so it fails with
-`ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT` (exit 1).
+`pnpm lint` exists at the root but no package defines a `lint` script, so it does nothing and exits 0
+(`--if-present`; without it pnpm 10 exits 1).
 There is no linter in this repo.
 
 Adapter packages run `vitest --passWithNoTests`, so a package with no tests reports green. The store
