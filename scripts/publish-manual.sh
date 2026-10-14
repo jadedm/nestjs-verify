@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Fallback publish for when the release workflow cannot publish (for example,
-# trusted publishing not configured for a package). Publishes every
-# non-private package whose current version is not on npm yet.
+# The release path: the release workflow does not publish (CI_PUBLISH unset,
+# #138). Publishes every non-private package whose current version is not on
+# npm yet.
 #
 # Run from your own terminal after `npm login`. npm then asks for 2FA as a
 # browser approval ("Authenticate your account at: ..."). That prompt needs a

@@ -10,8 +10,16 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 # can mint the OIDC token npm's trusted publisher accepts, and that job runs
 # no dependency install scripts (#37). The build and the Version Packages PR
 # happen in jobs without it.
+#
+# CI publishing is off (#19, closed 14 Oct 2026): releases publish by hand with
+# scripts/publish-manual.sh. build and publish run only when the repository
+# variable CI_PUBLISH is 'true' (#138). To turn it on, add a trusted publisher
+# on npmjs.com for each package in the release (npm expires one that has not
+# published within 48 hours), set CI_PUBLISH=true, then merge the Version
+# Packages PR.
 jobs:
   build:
+    if: vars.CI_PUBLISH == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,7 +73,7 @@ jobs:
 
   publish:
     needs: [build, version]
-    if: needs.version.outputs.has-changesets == 'false'
+    if: vars.CI_PUBLISH == 'true' && needs.version.outputs.has-changesets == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write

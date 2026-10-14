@@ -68,15 +68,15 @@ A handful of things this codebase cares about. Knowing them up front saves revie
 
 ## Releases
 
-Releases are driven by Changesets. Once you have a Trusted Publisher configured on npmjs.com for each package, the path is:
+Releases are driven by Changesets. The path is:
 
 1. Open a PR with a changeset.
 2. Merge to `main`.
 3. The Changesets action opens a "Version Packages" PR that bumps versions and rewrites changelogs.
 4. Review and merge the "Version Packages" PR.
-5. The release workflow publishes to npm using GitHub's OIDC token. No NPM_TOKEN is needed.
+5. The maintainer publishes from their own terminal with `scripts/publish-manual.sh` after `npm login`. It also tags each version and creates its GitHub release.
 
-If Trusted Publishing is not yet configured, the maintainer publishes from their own terminal with `scripts/publish-manual.sh` after `npm login`.
+The release workflow can publish through npm trusted publishing instead; it is off, and runs only when the repository variable `CI_PUBLISH` is `true` (#138).
 
 ## Reporting bugs and proposing features
 

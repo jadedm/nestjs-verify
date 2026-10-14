@@ -160,20 +160,24 @@ Release path, `.github/workflows/release.yml`, on every push to `main`:
   reading a missing version as a failed publish. A rerun inside that window fails with E409
   "previously staged version": wait until `npm view <package>@<version> version` shows it, then
   rerun.
-- With none, it publishes every package whose local version is not on npm, through npm trusted
-  publishing (OIDC, no token). The job upgrades npm to 11 and `scripts/check-publish-env.mjs` fails
-  the run unless npm is 11.5.1+ and Node 22.14.0+. Every release run through 0.6.3 that tried to
-  publish failed with E404: the job ran npm 10, which cannot publish with OIDC. It publishes with
-  `pnpm changeset publish`, after `check:exports` has loaded that same build.
-- Each package needs a trusted publisher on npmjs.com (owner step, per package). None is set up: on
-  6 Oct 2026 the owner chose to keep publishing by hand for now, so after a Version Packages merge
-  the job's publish fails with E404 and the owner runs the fallback below. #19 stays open until
-  trusted publishers exist and one CI publish has gone through.
+- CI publishing is off: #19 was closed as not planned on 14 Oct 2026, and no package has a trusted
+  publisher on npmjs.com. The `build` and `publish` jobs run only when the repository variable
+  `CI_PUBLISH` is `true` (#138); it is unset, so after a Version Packages merge the run does nothing
+  more and the owner publishes by hand (below). With it set and no pending changesets, `publish`
+  would publish every package whose local version is not on npm through npm trusted publishing
+  (OIDC, no token): it upgrades npm to 11, `scripts/check-publish-env.mjs` fails the run unless npm
+  is 11.5.1+ and Node 22.14.0+ (npm 10 answers an OIDC publish with E404), and it runs
+  `pnpm changeset publish` on the build `check:exports` loaded. To turn it on: add a trusted
+  publisher (GitHub Actions, jadedm/nestjs-verify, `release.yml`, "Allow npm publish") for each
+  package in the release, set `CI_PUBLISH=true`, merge the Version Packages PR. npm expires a
+  trusted publisher that has not published within 48 hours of being created (since 2 Oct 2026), so
+  this is a release-day step. Leave `CI_PUBLISH` set afterwards: with nothing to publish the job
+  only checks npm and tags.
 
-Fallback: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. It ends by running `scripts/tag-releases.mjs --after-publish`, which waits until npm lists each checked-out version that has no tag or no release yet and, unless it is a prerelease or npm's `latest` is already higher (#113; tagged, not released), shows it as `latest` (up to `TAG_RELEASES_WAIT_SECONDS`, default 600), then tags every published version at its release commit and creates a GitHub release for each package's newest version (`--dry-run` to preview). Without the wait it ran before npm listed 0.8.1, reported clean and tagged nothing (#111); hand publishes from 0.6.0 to 0.7.0 created no tags, so the repo showed 0.5.0 until #91. npm
+Publishing: `scripts/publish-manual.sh`, run by the owner in their own terminal after `npm login`. It ends by running `scripts/tag-releases.mjs --after-publish`, which waits until npm lists each checked-out version that has no tag or no release yet and, unless it is a prerelease or npm's `latest` is already higher (#113; tagged, not released), shows it as `latest` (up to `TAG_RELEASES_WAIT_SECONDS`, default 600), then tags every published version at its release commit and creates a GitHub release for each package's newest version (`--dry-run` to preview). With CI publishing off nothing reruns it later, so if that step fails or times out, run `node scripts/tag-releases.mjs --after-publish` again from a checkout of `main`. Without the wait it ran before npm listed 0.8.1, reported clean and tagged nothing (#111); hand publishes from 0.6.0 to 0.7.0 created no tags, so the repo showed 0.5.0 until #91. npm
 asks for 2FA as a browser approval, so `--otp` is optional. From a shell with no terminal attached (an
 agent's shell) the publish fails with `EOTP`, so hand the command over. Every version so far
-(through 0.7.0, 9 Oct 2026) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
+(through 1.0.0, 13 Oct 2026) was published by hand from the owner's account. Releases 0.6.1 to 0.6.3 were cut by hand on `release/x.y.z` branches with
 `pnpm changeset version`; Changesets also rewrites unrelated `package.json` formatting, which those
 release PRs dropped.
 
