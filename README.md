@@ -230,7 +230,7 @@ The runnable example in `examples/basic-twilio-postgres` wires the core, the Twi
 
 ## Releases
 
-Each package versions independently via [Changesets](https://github.com/changesets/changesets). A `linked` group keeps core, Twilio, Postgres and SES on the same version when they release together; Gupshup, Mongo and Redis version on their own. The release workflow is built for npm Trusted Publishing (OIDC), which needs no NPM_TOKEN once trusted publishers are configured per package on npmjs.com.
+Each package versions independently via [Changesets](https://github.com/changesets/changesets). A `linked` group keeps core, Twilio, Postgres and SES on the same version when they release together; Gupshup, Mongo and Redis version on their own.
 
 To propose a change:
 
@@ -241,7 +241,7 @@ git push
 # A "Version Packages" PR opens automatically.
 ```
 
-For now the packages are published by hand after that PR merges, with `scripts/publish-manual.sh`; CI publishing waits on trusted publishers being set up on npmjs.com ([#19](https://github.com/jadedm/nestjs-verify/issues/19)).
+The maintainer publishes after that PR merges, from their own terminal, with `scripts/publish-manual.sh`. The release workflow can also publish through npm trusted publishing (OIDC); it is switched off ([#19](https://github.com/jadedm/nestjs-verify/issues/19), [#138](https://github.com/jadedm/nestjs-verify/issues/138)).
 
 ## License
 
