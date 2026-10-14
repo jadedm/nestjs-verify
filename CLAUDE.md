@@ -12,6 +12,9 @@ a private runnable app wiring core, Twilio and Postgres together.
 
 ## Commands
 
+pnpm 10 (`packageManager`: 10.34.7; Changesets 3 needs 10, #135). The workflows install the version
+`packageManager` names. pnpm 10 runs no dependency install scripts by default; `@scarf/scarf`,
+`@swc/core` and `esbuild` are listed in `pnpm.ignoredBuiltDependencies` and nothing needs them.
 Development and the published packages need Node 22.12 or newer (`@nestjs/swagger` 12 and vite 7 need it); CI's `packed` job checks Node 22, 24 and 26, each against Nest 11 (`lowest`) and Nest 12 (`highest`) (#123).
 
 ```bash
@@ -33,7 +36,8 @@ The CI gate (`.github/workflows/ci.yml`) is build, typecheck, test, plus a separ
 job. Build comes first because adapters resolve `@jadedm/nestjs-verify` types through its
 `dist/index.d.ts`; a stale or missing core `dist` gives wrong typecheck results in the adapters.
 
-`pnpm lint` exists at the root but no package defines a `lint` script, so it does nothing and exits 0.
+`pnpm lint` exists at the root but no package defines a `lint` script, so it fails with
+`ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT` (exit 1).
 There is no linter in this repo.
 
 Adapter packages run `vitest --passWithNoTests`, so a package with no tests reports green. The store

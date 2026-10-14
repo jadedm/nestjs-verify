@@ -9,7 +9,7 @@
   },
   "author": "jadedm <jadedmanish@gmail.com>",
   "license": "MIT",
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@10.34.7",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -47,6 +47,11 @@
     "vitest": "^4.1.11"
   },
   "pnpm": {
+    "ignoredBuiltDependencies": [
+      "@scarf/scarf",
+      "@swc/core",
+      "esbuild"
+    ],
     "overrides": {
       "js-yaml@>=5.0.0 <5.4.1": "^5.4.1",
       "esbuild@>=0.27.0 <0.28.1": "^0.28.2"

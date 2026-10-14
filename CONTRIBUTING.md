@@ -45,6 +45,8 @@ If your change is purely internal (a refactor, a test, a CI tweak, a typo fix in
 
 ## Local development
 
+Use pnpm 10, the version `packageManager` in `package.json` names (on Node 22 or 24, `corepack enable` picks it up; Node 25 and later no longer ship corepack, so install pnpm 10 directly). pnpm 10 runs no dependency install scripts unless allowed; the ones this tree skips are listed under `pnpm.ignoredBuiltDependencies`, and nothing here needs them.
+
 ```bash
 pnpm install
 pnpm build
